@@ -1,0 +1,11 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "jauhariel",
+  "owner": "Jauhariel",
+  "proxied": false,
+  "repo": "github.com/jauhariel",
+  "description": "aku CEO",
+  "records": {
+    "CNAME": ["jauhariel.github.io"]
+  }
+}
