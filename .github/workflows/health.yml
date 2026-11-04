@@ -30,7 +30,7 @@ jobs:
 
       - name: File the outage issue
         if: steps.probe.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
@@ -75,7 +75,7 @@ jobs:
 
       - name: Close the outage issue
         if: steps.probe.outcome == 'success'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const marker = '<!-- zone-health -->';
