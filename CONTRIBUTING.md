@@ -19,6 +19,7 @@ DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/Hi
   "domain": "is-a.ceo",
   "subdomain": "mc",
   "owner": "your-github-username",
+  "email": "you@example.com",
   "repo": "github.com/you/your-repo",
   "description": "My Minecraft server",
   "records": {
@@ -35,6 +36,7 @@ DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/Hi
 | `domain`      | yes      | The zone the subdomain belongs to; must be listed in `domains/_meta.json`. |
 | `subdomain`   | yes      | See the shapes below.                                                      |
 | `owner`       | yes      | Your GitHub username, so people can reach you.                            |
+| `email`       | no       | Contact address like `you@example.com`. Optional, but the fastest way for maintainers to reach you. |
 | `proxied`     | no       | Route through the Cloudflare proxy. Defaults to `false`, see below.      |
 | `repo`        | no       | `owner/repo` or `github.com/owner/repo`. Shown on the site.               |
 | `description` | no       | One line, shown on the site.                                              |

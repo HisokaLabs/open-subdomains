@@ -72,6 +72,18 @@ function validRepo(value) {
   return parts.every((p) => /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(p));
 }
 
+function validEmail(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 254) return false;
+  const at = value.lastIndexOf("@");
+  if (at === -1) return false;
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (local.length === 0 || local.length > 64) return false;
+  if (!/^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$/.test(local)) return false;
+  if (local.startsWith(".") || local.endsWith(".") || local.includes("..")) return false;
+  return validTarget(domain);
+}
+
 // --- Public-internet checks -------------------------------------------------
 // A registry record is reachable from the public internet by definition, so
 // anything that only resolves inside someone's own network is either a
@@ -286,6 +298,9 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
     subOwners.set(`${zone}/${sub}`, owner.toLowerCase());
   }
 
+  if (entry.email !== undefined && !validEmail(entry.email)) {
+    fail(`${where}: "email" must be a valid email address, e.g. you@example.com`);
+  }
   if (entry.repo !== undefined && !validRepo(entry.repo)) {
     fail(`${where}: "repo" must be a hostname, e.g. github.com/you/repo`);
   }

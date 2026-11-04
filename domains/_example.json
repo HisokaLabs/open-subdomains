@@ -4,6 +4,7 @@
   "domain": "is-a.ceo",
   "subdomain": "example",
   "owner": "your-github-username",
+  "email": "you@example.com",
   "proxied": false,
   "repo": "github.com/your-github-username/your-repo",
   "description": "One line describing what runs here.",

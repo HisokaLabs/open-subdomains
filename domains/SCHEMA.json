@@ -23,6 +23,12 @@
       "maxLength": 39,
       "description": "Your GitHub username, so people can reach you. Must match the PR author."
     },
+    "email": {
+      "type": "string",
+      "maxLength": 254,
+      "format": "email",
+      "description": "Optional contact address, e.g. you@example.com. The fastest way for maintainers to reach you; format-checked by CI when present."
+    },
     "proxied": {
       "type": "boolean",
       "default": false,
