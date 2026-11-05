@@ -298,7 +298,7 @@ test("a zone-wide record does not consume its holder's quota", () => {
     "www.is-a.ceo.json": labelled("www", { owner: "HisokaLabs", records: { CNAME: ["hisokalabs.github.io"] } }),
     "_vercel.is-a.ceo.json": labelled("_vercel", {
       owner: "HisokaLabs",
-      records: { TXT: ["vc-domain-verify=anyone.is-a.ceo,x"] },
+      records: { TXT: ["some-service-verification=anyone"] },
     }),
   };
   assert.equal(accepts(files).code, 0);
@@ -323,6 +323,30 @@ test("an underscore record cannot hijack another owner's base", () => {
     },
     /claimed by the same owner/,
   );
+});
+
+test("a Vercel proof published under someone else's name is rejected", () => {
+  rejects(
+    {
+      "attacker.is-a.ceo.json": labelled("attacker", { owner: "attacker" }),
+      "_vercel.attacker.is-a.ceo.json": labelled("_vercel.attacker", {
+        owner: "attacker",
+        records: { TXT: ["vc-domain-verify=victim.is-a.ceo,deadbeef"] },
+      }),
+    },
+    /only counts on "_vercel\.victim\.is-a\.ceo"/,
+  );
+});
+
+test("a Vercel proof under its own name passes", () => {
+  const owned = {
+    "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }),
+    "_vercel.holder.is-a.ceo.json": labelled("_vercel.holder", {
+      owner: "holder",
+      records: { TXT: ["vc-domain-verify=holder.is-a.ceo,deadbeef"] },
+    }),
+  };
+  assert.equal(accepts(owned).code, 0);
 });
 
 test("a service SRV record needs no base claim", () => {

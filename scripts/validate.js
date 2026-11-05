@@ -127,6 +127,7 @@ function advisoryCheck(file, entry, meta) {
 // One DNS label: optional leading underscore (e.g. _acme-challenge), then
 // the usual letters, digits and hyphens, not ending in a hyphen.
 const LABEL_RE = /^_?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+const VERIFY_RE = /^vc-domain-verify=([^,\s]+),([0-9A-Za-z_-]+)$/;
 
 function validLabel(label) {
   return typeof label === "string" && label.length > 0 && label.length <= 63 && LABEL_RE.test(label);
@@ -516,11 +517,19 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
   }
   if (records.TXT !== undefined) {
     if (!Array.isArray(records.TXT)) fail(`${where}: records.TXT must be an array`);
+    const ownFqdn = sub === "@" ? zone : `${sub}.${zone}`;
     records.TXT.forEach((v) => {
       if (typeof v !== "string" || v.length === 0) fail(`${where}: TXT values must be non-empty strings`);
       if (v.length > 255) fail(`${where}: TXT value exceeds 255 characters`);
       // eslint-disable-next-line no-control-regex
       if (/[\x00-\x1f\x7f]/.test(v)) fail(`${where}: TXT values must not contain control characters`);
+      const proof = VERIFY_RE.exec(v.trim());
+      if (proof && ownFqdn !== `_vercel.${proof[1].toLowerCase()}`) {
+        fail(
+          `${where}: this Vercel proof verifies "${proof[1]}", so it only counts on ` +
+            `"_vercel.${proof[1].toLowerCase()}", not on ${ownFqdn}`,
+        );
+      }
       norm.TXT.push(v);
     });
   }
