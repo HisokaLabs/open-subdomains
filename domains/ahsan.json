@@ -1,0 +1,15 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "yz776",
+  "owner": {
+    "username": "Yz776",
+    "email": "aksan080821@gmail.com"
+  },
+  "repo": "github.com/Yz776",
+  "records": {
+    "A": [
+      "75.2.60.5"
+    ]
+  },
+  "description": "Ingin menjadi CEO."
+}
