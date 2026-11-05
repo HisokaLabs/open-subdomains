@@ -1,0 +1,11 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "ornzora",
+  "owner": "Ornzora",
+  "repo": "github.com/Ornzora/my",
+  "description": "A little piece of me",
+  "records": {
+    "CNAME": ["1e5e9fe308449798.vercel-dns-017.com."],
+    "TXT": ["vc-domain-verify=ornzora.is-a.ceo,c0ed4d220840ae068a45"]
+  }
+}
