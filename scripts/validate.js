@@ -2,6 +2,7 @@
 
 "use strict";
 
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
@@ -345,6 +346,60 @@ function loadMetaFrom(raw) {
 function loadMeta() {
   if (!fs.existsSync(META_PATH)) fail("domains/_meta.json not found");
   return loadMetaFrom(fs.readFileSync(META_PATH, "utf8"));
+}
+
+function readMetaAt(ref) {
+  try {
+    const raw = execFileSync("git", ["show", `${ref}:domains/_meta.json`], {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return loadMetaFrom(raw);
+  } catch {
+    return null;
+  }
+}
+
+function loadBaseMeta() {
+  const base = process.env.GITHUB_BASE_REF || "main";
+  return readMetaAt(`origin/${base}`) || readMetaAt(base);
+}
+
+const POLICY_LISTS = ["blocked", "reservedClasses", "reserved"];
+
+function checkMetaPolicy(meta, baseMeta) {
+  if (!baseMeta) return;
+  const author = String(process.env.PR_AUTHOR || "").trim().replace(/^@/, "").toLowerCase();
+  if (!author) return;
+  if (baseMeta.maintainers.includes(author)) return;
+
+  const where = "domains/_meta.json";
+  const added = meta.maintainers.filter((m) => !baseMeta.maintainers.includes(m));
+  if (added.length > 0) {
+    fail(
+      `${where}: this pull request adds ${added.map((a) => `"${a}"`).join(", ")} to "maintainers"; ` +
+        `only an existing maintainer can grant that`,
+    );
+  }
+
+  for (const key of POLICY_LISTS) {
+    const dropped = baseMeta[key].filter((v) => !meta[key].includes(v));
+    if (dropped.length > 0) {
+      fail(
+        `${where}: this pull request drops ${dropped.slice(0, 5).map((d) => `"${d}"`).join(", ")} from "${key}"; ` +
+          `only a maintainer can loosen the name policy`,
+      );
+    }
+  }
+
+  if (JSON.stringify(meta.zones) !== JSON.stringify(baseMeta.zones)) {
+    fail(`${where}: this pull request changes "zones"; only a maintainer can change which zones are served`);
+  }
+
+  if (meta.maxLength > baseMeta.maxLength) {
+    fail(`${where}: this pull request raises "maxLength" from ${baseMeta.maxLength} to ${meta.maxLength}; only a maintainer can loosen the name policy`);
+  }
 }
 
 function validateEntry(file, entry, meta, seen, claims, subOwners) {
@@ -733,6 +788,7 @@ function main() {
   let meta;
   try {
     meta = loadMeta();
+    checkMetaPolicy(meta, loadBaseMeta());
   } catch (err) {
     if (!isValidationError(err)) throw err;
     problems.push({ file: null, message: err.message });

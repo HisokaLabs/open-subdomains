@@ -13,6 +13,7 @@ const FIELD_HINTS = [
   { test: /missing "subdomain"/, key: "subdomain" },
   { test: /cannot be reassigned|cannot change hands/, key: "takeover" },
   { test: /cannot delete an entry owned by someone else/, key: "deletion" },
+  { test: /only an existing maintainer can grant that|only a maintainer can loosen|only a maintainer can change which zones/, key: "meta" },
   { test: /cannot serve one site/, key: "shared-target" },
   { test: /"owner" must be a plain username string/, key: "owner" },
   { test: /missing "owner"/, key: "owner" },
@@ -98,6 +99,8 @@ const NOTES = {
     "A subdomain that already exists belongs to the owner on `main`. A pull request cannot reassign it by editing the file. Only a maintainer can transfer a name.",
   deletion:
     "A pull request cannot remove a name that belongs to someone else. Deleting your own entry is fine; removing another person's needs a maintainer.",
+  meta:
+    "`domains/_meta.json` holds the maintainer list and the name policy. Only a maintainer can approve a change to it, so a contributor PR must leave it alone.",
   "shared-target":
     "Two names pointing at one host means one page answers under two subdomains. Point the record at your own deployment target, not at another entry's.",
   owner:

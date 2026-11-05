@@ -736,3 +736,48 @@ test("a self-promotion in _meta.json does not grant maintainer rights", { skip: 
   assert.equal(code, 1);
   assert.match(out, /cannot be reassigned/);
 });
+
+test("a non-maintainer cannot loosen the reserved list through _meta.json", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "someone" }) }, (root) => {
+    const metaPath = path.join(root, "domains", "_meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    meta._meta.reserved = meta._meta.reserved.filter((r) => r !== "admin");
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    gitRun(root, ["commit", "-qam", "unreserve admin"]);
+  });
+  const { code, out } = run(dir, "validate.js", { PR_AUTHOR: "someone", GITHUB_BASE_REF: "main" });
+  assert.equal(code, 1);
+  assert.match(out, /drops "admin" from "reserved"/);
+});
+
+test("a non-maintainer cannot add themselves to maintainers", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "someone" }) }, (root) => {
+    const metaPath = path.join(root, "domains", "_meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    meta._meta.maintainers.push("someone");
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    gitRun(root, ["commit", "-qam", "self promote"]);
+  });
+  const { code, out } = run(dir, "validate.js", { PR_AUTHOR: "someone", GITHUB_BASE_REF: "main" });
+  assert.equal(code, 1);
+  assert.match(out, /only an existing maintainer can grant that/);
+});
+
+test("a maintainer may still loosen the name policy", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "someone" }) }, (root) => {
+    const metaPath = path.join(root, "domains", "_meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    meta._meta.reserved = meta._meta.reserved.filter((r) => r !== "admin");
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    gitRun(root, ["commit", "-qam", "unreserve admin"]);
+  });
+  assert.equal(run(dir, "validate.js", { PR_AUTHOR: "dikaardnt", GITHUB_BASE_REF: "main" }).code, 0);
+});
+
+test("an untouched _meta.json raises nothing", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "someone" }) }, (root) => {
+    fs.writeFileSync(path.join(root, "domains", "web.is-a.ceo.json"), JSON.stringify(labelled("web", { owner: "someone", description: "edited" }), null, 2));
+    gitRun(root, ["commit", "-qam", "touch the entry"]);
+  });
+  assert.equal(run(dir, "validate.js", { PR_AUTHOR: "someone", GITHUB_BASE_REF: "main" }).code, 0);
+});
