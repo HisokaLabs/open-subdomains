@@ -49,7 +49,7 @@ DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/Hi
 ### Subdomain shapes
 
 The `subdomain` field and the filename (without the `.is-a.ceo.json` suffix)
-must match exactly. All of these are valid, following the reference registry:
+must match exactly. All of these are valid:
 
 | Shape                     | Filename                          | What it is for                                  |
 | ------------------------- | --------------------------------- | ----------------------------------------------- |
@@ -71,11 +71,9 @@ for `*.is-a.ceo`, `_dmarc.is-a.ceo` forges mail policy for the whole zone, and
 `_vercel.is-a.ceo` is the ownership proof Vercel asks for when the zone is
 already linked to another account. Put your own record one label deeper, e.g.
 `_acme-challenge.app` or `_vercel.yourname`, where the base-claim rule above
-applies. The filename contains
-`*`, which Windows cannot create on an NTFS disk. That matches the reference
-registry, where everything runs on Linux and CI. If you develop on Windows,
-add wildcard entries through the GitHub web interface instead of a local
-clone.
+applies. The filename contains `*`, which Windows cannot create on an NTFS
+disk. If you develop on Windows, add wildcard entries through the GitHub web
+interface instead of a local clone; CI runs on Linux, where it is fine.
 
 ### Pointing at Vercel
 

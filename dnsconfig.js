@@ -106,9 +106,9 @@ domains.forEach(function (entry) {
 	});
 });
 
-// One zone per zone seen in the data, exactly like the reference design. A
-// zone with no entries simply is not declared, and a zone name that is not
-// set up in the Cloudflare account fails the push, which keeps typos out.
+// One zone per zone seen in the data. A zone with no entries simply is not
+// declared, and a zone name that is not set up in the Cloudflare account
+// fails the push, which keeps typos out.
 Object.keys(recordsByZone).forEach(function (zone) {
 	D(zone, REG_NONE, DNS_PROVIDER, recordsByZone[zone]);
 });
