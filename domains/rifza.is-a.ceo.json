@@ -1,1 +1,10 @@
-{"domain":"is-a.ceo","subdomain":"rifza","owner":"Rifza123","repo":"github.com/Rifza123/Experimental-Bell","description":"Ingin menjadi CEO."}
+{
+  "domain": "is-a.ceo",
+  "subdomain": "rifza",
+  "owner": "Rifza123",
+  "repo": "github.com/Rifza123/Experimental-Bell",
+  "description": "Ingin menjadi CEO.",
+  "records": {
+    "CNAME": ["dimensional-halibut-uyz5gozm14vidl7xt6d0p5gd.herokudns.com"]
+  }
+}
