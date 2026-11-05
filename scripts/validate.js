@@ -327,9 +327,8 @@ function validTarget(value) {
   return true;
 }
 
-function loadMeta() {
-  if (!fs.existsSync(META_PATH)) fail("domains/_meta.json not found");
-  const parsed = JSON.parse(fs.readFileSync(META_PATH, "utf8"));
+function loadMetaFrom(raw) {
+  const parsed = JSON.parse(raw);
   const meta = parsed._meta || parsed;
   const policy = meta.namePolicy || {};
   return {
@@ -343,11 +342,11 @@ function loadMeta() {
   };
 }
 
-/**
- * Validate one registry entry. Every failure is a hard error: this runs on
- * every PR. Wildcard base-ownership is checked separately in checkWildcards,
- * after every file has been seen.
- */
+function loadMeta() {
+  if (!fs.existsSync(META_PATH)) fail("domains/_meta.json not found");
+  return loadMetaFrom(fs.readFileSync(META_PATH, "utf8"));
+}
+
 function validateEntry(file, entry, meta, seen, claims, subOwners) {
   const where = file;
 
@@ -796,7 +795,52 @@ function main() {
     }
   }
 
+  problems.push(...checkSharedTargets(entries));
+
   report(problems, entries.map((e) => e.file), warnings);
+}
+
+function checkSharedTargets(entries) {
+  const problems = [];
+  const byTarget = new Map();
+  for (const { file, entry } of entries) {
+    const records = isPlainObject(entry.records) ? entry.records : {};
+    for (const kind of ["CNAME", "A", "AAAA"]) {
+      const raw = records[kind];
+      const values = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+      for (const value of values) {
+        if (typeof value !== "string") continue;
+        const target = value.trim().toLowerCase().replace(/\.$/, "");
+        if (target.length === 0) continue;
+        const key = `${kind}:${target}`;
+        const owner = String(entry.owner).toLowerCase();
+        const name = `${entry.subdomain}.${entry.domain}`;
+        const sharing = byTarget.get(key);
+        if (sharing) {
+          if (sharing.owner !== owner) {
+            sharing.entries.push({ file, name });
+          }
+          continue;
+        }
+        byTarget.set(key, { owner, name, entries: [{ file, name }] });
+      }
+    }
+  }
+  for (const [key, sharing] of byTarget) {
+    if (sharing.entries.length < 2) continue;
+    const target = key.slice(key.indexOf(":") + 1);
+    for (const { file, name } of sharing.entries) {
+      const others = sharing.entries.filter((e) => e.name !== name).map((e) => e.name);
+      problems.push({
+        file,
+        message:
+          `${file}: records.${key.slice(0, key.indexOf(":"))} "${target}" is also used by ` +
+          `${others.join(", ")} for a different owner; two names cannot serve one site, ` +
+          `so point this at your own host`,
+      });
+    }
+  }
+  return problems;
 }
 
 function report(problems, verified, warnings = []) {

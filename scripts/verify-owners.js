@@ -37,14 +37,28 @@ function getRawOwner(entry) {
   return "";
 }
 
-function loadMaintainers() {
+function maintainersFrom(value) {
+  const meta = value && value._meta ? value._meta : value;
+  return meta && Array.isArray(meta.maintainers)
+    ? meta.maintainers.map((s) => normalizeUsername(s)).filter(Boolean)
+    : [];
+}
+
+function loadMaintainers(ref) {
+  if (!ref) return maintainersFromFile();
+  const raw = runGit(["show", `${ref}:domains/_meta.json`]);
+  if (raw === null) return maintainersFromFile();
+  try {
+    return maintainersFrom(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+function maintainersFromFile() {
   if (!fs.existsSync(META_PATH)) return [];
   try {
-    const parsed = JSON.parse(fs.readFileSync(META_PATH, "utf8"));
-    const meta = parsed._meta || parsed;
-    return Array.isArray(meta.maintainers)
-      ? meta.maintainers.map((s) => normalizeUsername(s)).filter(Boolean)
-      : [];
+    return maintainersFrom(JSON.parse(fs.readFileSync(META_PATH, "utf8")));
   } catch {
     return [];
   }
@@ -61,6 +75,8 @@ function runGit(args) {
     return null;
   }
 }
+
+const BASE_REF = process.env.GITHUB_BASE_REF || "main";
 
 function changedFiles() {
   if (process.env.CHANGED_FILES) {
@@ -80,9 +96,9 @@ function changedFiles() {
 
   const base = process.env.GITHUB_BASE_REF || "main";
   const diffStrategies = [
-    ["diff", "--name-only", "--diff-filter=ACMR", `origin/${base}...HEAD`, "--", "domains"],
-    ["diff", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`, "--", "domains"],
-    ["diff", "--name-only", "--diff-filter=ACMR", "HEAD~1...HEAD", "--", "domains"],
+    ["diff", "--name-only", "--diff-filter=ACMRD", `origin/${base}...HEAD`, "--", "domains"],
+    ["diff", "--name-only", "--diff-filter=ACMRD", `${base}...HEAD`, "--", "domains"],
+    ["diff", "--name-only", "--diff-filter=ACMRD", "HEAD~1...HEAD", "--", "domains"],
     ["status", "--porcelain", "--", "domains"],
   ];
 
@@ -139,7 +155,7 @@ function main() {
   }
 
   const author = normalizeUsername(prAuthor);
-  const maintainers = loadMaintainers();
+  const maintainers = loadMaintainers(`origin/${BASE_REF}`);
   if (maintainers.includes(author)) {
     console.log(`verify-owners: PR author "${prAuthor}" is a registry maintainer, skipping owner check`);
     process.exit(0);
@@ -153,10 +169,22 @@ function main() {
 
   const mismatches = [];
   const takeovers = [];
+  const removals = [];
 
   for (const file of files) {
     const full = path.resolve(ROOT, file);
-    if (!fs.existsSync(full)) continue;
+    if (!fs.existsSync(full)) {
+      const baseEntry = readFromBase(file, BASE_REF);
+      if (baseEntry) {
+        const previous = baseOwnerUsername(baseEntry);
+        if (previous && previous !== author) {
+          removals.push(
+            `${file}: this entry belongs to "${previous}"; only the owner or a maintainer can delete it`
+          );
+        }
+      }
+      continue;
+    }
 
     let parsed;
     try {
@@ -178,7 +206,7 @@ function main() {
       }
     }
 
-    const baseEntry = readFromBase(file, process.env.GITHUB_BASE_REF || "main");
+    const baseEntry = readFromBase(file, BASE_REF);
     if (baseEntry) {
       const previous = baseOwnerUsername(baseEntry);
       const current = baseOwnerUsername(parsed);
@@ -198,6 +226,12 @@ function main() {
       "\nIf you are claiming this subdomain for someone else, ask them to open the PR " +
         "themselves, or set \"owner\" to your own username."
     );
+    process.exit(1);
+  }
+
+  if (removals.length > 0) {
+    console.error("verify-owners: a pull request cannot delete an entry owned by someone else.");
+    removals.forEach((r) => console.error(`  - ${r}`));
     process.exit(1);
   }
 

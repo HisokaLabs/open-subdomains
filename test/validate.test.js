@@ -660,3 +660,79 @@ test("the real _meta.json reserves the pronoun paradigm", () => {
   assert.deepEqual(meta.namePolicy.reservedClasses, ["pronoun", "determiner", "function-word"]);
   assert.deepEqual(meta.namePolicy.advisoryClasses, ["generic-noun"]);
 });
+
+test("two names owned by different people cannot share a CNAME target", () => {
+  const out = rejects(
+    {
+      "first.is-a.ceo.json": labelled("first", { owner: "owner-a", records: { CNAME: ["same.vercel-dns-017.com"] } }),
+      "second.is-a.ceo.json": labelled("second", { owner: "owner-b", records: { CNAME: ["same.vercel-dns-017.com"] } }),
+    },
+    /cannot serve one site/,
+  );
+  assert.match(out, /first\.is-a\.ceo/);
+  assert.match(out, /second\.is-a\.ceo/);
+});
+
+test("a trailing dot does not hide a shared CNAME target", () => {
+  rejects(
+    {
+      "first.is-a.ceo.json": labelled("first", { owner: "owner-a", records: { CNAME: ["same.vercel-dns-017.com."] } }),
+      "second.is-a.ceo.json": labelled("second", { owner: "owner-b", records: { CNAME: ["SAME.vercel-dns-017.com"] } }),
+    },
+    /cannot serve one site/,
+  );
+});
+
+test("two names with their own targets are accepted", () => {
+  const { code } = accepts({
+    "first.is-a.ceo.json": labelled("first", { owner: "owner-a", records: { CNAME: ["a.vercel-dns-017.com"] } }),
+    "second.is-a.ceo.json": labelled("second", { owner: "owner-b", records: { CNAME: ["b.vercel-dns-017.com"] } }),
+  });
+  assert.equal(code, 0);
+});
+
+test("two names owned by different people cannot share an A record either", () => {
+  rejects(
+    {
+      "first.is-a.ceo.json": labelled("first", { owner: "owner-a", records: { A: ["75.2.60.5"] } }),
+      "second.is-a.ceo.json": labelled("second", { owner: "owner-b", records: { A: ["75.2.60.5"] } }),
+    },
+    /cannot serve one site/,
+  );
+});
+
+test("verify-owners rejects deleting an entry owned by someone else", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "original-owner" }) }, (root) => {
+    gitRun(root, ["rm", "-q", "domains/web.is-a.ceo.json"]);
+    gitRun(root, ["commit", "-qam", "delete"]);
+  });
+  const { code, out } = run(dir, "verify-owners.js", { PR_AUTHOR: "attacker", GITHUB_BASE_REF: "main" });
+  assert.equal(code, 1);
+  assert.match(out, /cannot delete an entry owned by someone else/);
+  assert.match(out, /original-owner/);
+});
+
+test("verify-owners lets an owner delete their own entry", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "original-owner" }) }, (root) => {
+    gitRun(root, ["rm", "-q", "domains/web.is-a.ceo.json"]);
+    gitRun(root, ["commit", "-qam", "delete"]);
+  });
+  assert.equal(run(dir, "verify-owners.js", { PR_AUTHOR: "original-owner", GITHUB_BASE_REF: "main" }).code, 0);
+});
+
+test("a self-promotion in _meta.json does not grant maintainer rights", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "original-owner" }) }, (root) => {
+    const metaPath = path.join(root, "domains", "_meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    meta._meta.maintainers.push("attacker");
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    const target = path.join(root, "domains", "web.is-a.ceo.json");
+    const entry = JSON.parse(fs.readFileSync(target, "utf8"));
+    entry.owner = "attacker";
+    fs.writeFileSync(target, JSON.stringify(entry, null, 2));
+    gitRun(root, ["commit", "-qam", "promote then take over"]);
+  });
+  const { code, out } = run(dir, "verify-owners.js", { PR_AUTHOR: "attacker", GITHUB_BASE_REF: "main" });
+  assert.equal(code, 1);
+  assert.match(out, /cannot be reassigned/);
+});

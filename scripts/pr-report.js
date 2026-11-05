@@ -35,6 +35,17 @@ function parseOwnerMismatches(stderr) {
       });
       continue;
     }
+    const removal = /^(.+?):\s+this entry belongs to "(.+?)"/.exec(body);
+    if (removal) {
+      const file = removal[1].split(/[\\/]/).pop();
+      problems.push({
+        file,
+        message:
+          `${file}: this name belongs to "${removal[2]}", so this pull request cannot delete it; ` +
+          `only the owner or a maintainer can remove a name`,
+      });
+      continue;
+    }
     const takeover = /^(.+?):\s+owner changes from "(.+?)" to "(.+?)"/.exec(body);
     if (takeover) {
       const file = takeover[1].replace(/\\/g, "/").split("/").pop();
