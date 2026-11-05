@@ -339,3 +339,116 @@ test("the real registry in this repository passes", () => {
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
   assert.match(result.stdout, /verified/);
 });
+
+function runJson(dir, script, env) {
+  const result = spawnSync(process.execPath, [path.join(dir, "scripts", script), "--json"], {
+    encoding: "utf8",
+    cwd: dir,
+    env: { ...process.env, ...env },
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { code: result.status, payload: JSON.parse(result.stdout || "{}") };
+}
+
+test("every problem in one file is reported at once", () => {
+  const { code, payload } = runJson(makeRegistry({ "jh.is-a.ceo.json": { owner: { username: "FionyBot" } } }), "validate.js");
+  assert.equal(code, 1);
+  const messages = payload.problems.map((p) => p.message).join("\n");
+  assert.match(messages, /missing "domain"/);
+  assert.match(messages, /missing "subdomain"/);
+  assert.match(messages, /"owner" must be a plain username string/);
+});
+
+test("one broken file does not hide problems in another", () => {
+  const { payload } = runJson(
+    makeRegistry({
+      "one.is-a.ceo.json": { owner: { username: "a" } },
+      "two.is-a.ceo.json": { domain: "is-a.ceo", subdomain: "two", owner: "b", records: { A: ["10.0.0.1"] } },
+    }),
+    "validate.js",
+  );
+  const files = new Set(payload.problems.map((p) => p.file));
+  assert.ok(files.has("one.is-a.ceo.json"));
+  assert.ok(files.has("two.is-a.ceo.json"));
+});
+
+test("an owner written as an object gets a concrete rewrite", () => {
+  const { payload } = runJson(makeRegistry({ "jh.is-a.ceo.json": { owner: { username: "FionyBot" } } }), "validate.js");
+  const message = payload.problems.map((p) => p.message).join("\n");
+  assert.match(message, /"owner": "FionyBot"/);
+});
+
+test("a registry entry missing the .json extension is reported", () => {
+  const dir = makeRegistry({});
+  fs.writeFileSync(path.join(dir, "domains", "stray.is-a.ceo"), JSON.stringify(labelled("stray")));
+  const { code, payload } = runJson(dir, "validate.js");
+  assert.equal(code, 1);
+  assert.match(payload.problems.map((p) => p.message).join("\n"), /rename it to "stray\.is-a\.ceo\.json"/);
+});
+
+test("a non-JSON file that is not an entry is left alone", () => {
+  const dir = makeRegistry({ "ok.is-a.ceo.json": labelled("ok") });
+  fs.rmSync(dir, { recursive: true, force: true });
+  const fresh = makeRegistry({ "ok.is-a.ceo.json": labelled("ok") });
+  fs.writeFileSync(path.join(fresh, "domains", "NOTES.md"), "hello");
+  const { code } = runJson(fresh, "validate.js");
+  assert.equal(code, 0);
+});
+
+test("a CNAME sharing its name with TXT is a warning, not a failure", () => {
+  const entry = labelled("ornzora", { records: { CNAME: ["ornzora.vercel.app"], TXT: ["vc-domain-verify=x"] } });
+  const { code, payload } = runJson(makeRegistry({ "ornzora.is-a.ceo.json": entry }), "validate.js");
+  assert.equal(code, 0);
+  assert.equal(payload.ok, true);
+  assert.match(payload.warnings.map((w) => w.message).join("\n"), /_vercel\.ornzora/);
+});
+
+test("--json output is a single object with ok, verified, problems and warnings", () => {
+  const { payload } = runJson(makeRegistry({ "mc.is-a.ceo.json": labelled("mc") }), "validate.js");
+  assert.deepEqual(Object.keys(payload).sort(), ["ok", "problems", "verified", "warnings"]);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(payload.verified, ["mc.is-a.ceo.json"]);
+});
+
+function runReport(files, env) {
+  const dir = makeRegistry(files);
+  const validate = spawnSync(process.execPath, [path.join(dir, "scripts", "validate.js"), "--json"], {
+    encoding: "utf8",
+    cwd: dir,
+  });
+  const result = spawnSync(process.execPath, [path.join(dir, "scripts", "render-report.js")], {
+    encoding: "utf8",
+    cwd: dir,
+    input: validate.stdout,
+    env: { ...process.env, ...env },
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return result.stdout;
+}
+
+test("the report explains a failure and shows a valid example", () => {
+  const markdown = runReport({ "jh.is-a.ceo.json": { owner: { username: "FionyBot" } } }, { PR_AUTHOR: "FionyBot" });
+  assert.match(markdown, /<!-- registry-validator -->/);
+  assert.match(markdown, /## Registry check failed/);
+  assert.match(markdown, /What a valid file looks like/);
+  assert.match(markdown, /"subdomain": "jh"/);
+  assert.match(markdown, /"owner": "your-github-username"/);
+});
+
+test("the report is quiet about a clean entry", () => {
+  const markdown = runReport({ "mc.is-a.ceo.json": labelled("mc") }, {});
+  assert.match(markdown, /## Registry check passed/);
+  assert.match(markdown, /A maintainer still has to review/);
+});
+
+test("the report escalates a CNAME plus TXT entry", () => {
+  const entry = labelled("ornzora", { records: { CNAME: ["ornzora.vercel.app"], TXT: ["vc-domain-verify=x"] } });
+  const markdown = runReport({ "ornzora.is-a.ceo.json": entry }, {});
+  assert.match(markdown, /one change needed before merge/);
+  assert.match(markdown, /_vercel\.ornzora/);
+});
+
+test("the report never leaves an unresolved link", () => {
+  const markdown = runReport({ "mc.is-a.ceo.json": labelled("mc") }, {});
+  assert.doesNotMatch(markdown, /\]\(\.\//);
+});

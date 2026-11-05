@@ -12,13 +12,101 @@ const META_PATH = path.join(DOMAINS_DIR, "_meta.json");
 
 const RESERVED_FILENAMES = new Set(["_meta.json", "_example.json", "SCHEMA.json"]);
 
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
 function fail(message) {
-  console.error(`validate: ${message}`);
-  process.exit(1);
+  throw new ValidationError(message);
+}
+
+const JSON_MODE = process.argv.includes("--json");
+
+function isValidationError(err) {
+  return err instanceof ValidationError;
 }
 
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function preflightEntry(file, entry, meta) {
+  const problems = [];
+  const push = (message) => problems.push({ file, message: `${file}: ${message}` });
+
+  if (!isPlainObject(entry)) {
+    push("entry must be a single JSON object (one entry per file, not an array or a bare string)");
+    return problems;
+  }
+
+  const allowedKeys = new Set([
+    "$schema", "_about", "domain", "subdomain", "owner", "email",
+    "proxied", "repo", "description", "records",
+  ]);
+  for (const key of Object.keys(entry)) {
+    if (!allowedKeys.has(key)) {
+      push(`unknown key "${key}" (allowed: ${[...allowedKeys].join(", ")})`);
+    }
+  }
+
+  if (typeof entry.domain !== "string" || entry.domain.trim().length === 0) {
+    push('missing "domain" (the zone this subdomain belongs to, e.g. "is-a.ceo")');
+  } else if (meta && meta.zones.length > 0) {
+    const zone = entry.domain.toLowerCase().trim();
+    if (!meta.zones.includes(zone)) {
+      push(`zone "${zone}" is not a managed zone (${meta.zones.join(", ")})`);
+    }
+  }
+
+  if (typeof entry.subdomain !== "string" || entry.subdomain.trim().length === 0) {
+    push('missing "subdomain" (the label you are claiming, e.g. "mc")');
+  }
+
+  if (entry.owner === undefined) {
+    push('missing "owner" (your GitHub username as a plain string, e.g. "octocat")');
+  } else if (isPlainObject(entry.owner)) {
+    const guess = entry.owner.username || entry.owner.name || entry.owner.login || "";
+    push(
+      '"owner" must be a plain username string, not an object' +
+        (guess ? `; write "owner": "${guess}" instead of "owner": { "username": "${guess}" }` : ""),
+    );
+  } else if (typeof entry.owner !== "string" || entry.owner.trim().length === 0) {
+    push('"owner" must be a non-empty string (your GitHub username)');
+  }
+
+  if (entry.records !== undefined && !isPlainObject(entry.records)) {
+    push('"records" must be an object keyed by record type, e.g. { "CNAME": "you.vercel.app" }');
+  }
+
+  return problems;
+}
+
+function advisoryCheck(file, entry) {
+  const warnings = [];
+  if (!isPlainObject(entry) || !isPlainObject(entry.records)) return warnings;
+  const records = entry.records;
+  const hasCname = records.CNAME !== undefined;
+  const sidecar = [];
+  if (records.TXT !== undefined) sidecar.push("TXT");
+  if (records.CAA !== undefined) sidecar.push("CAA");
+  if (hasCname && sidecar.length > 0) {
+    const sub = typeof entry.subdomain === "string" ? entry.subdomain.trim() : "";
+    const zone = typeof entry.domain === "string" ? entry.domain.trim() : "";
+    const ownName = sub && zone ? `${sub}.${zone}` : "this name";
+    warnings.push({
+      file,
+      message:
+        `${file}: records.${sidecar.join(" and records.")} sits on the same name as a CNAME. ` +
+        `DNSControl refuses to apply that ("cannot have CNAME and TXT record with same name"), ` +
+        `so the DNS push will fail after merge. Move the ${sidecar.join("/")} to its own dotted ` +
+        `name, e.g. "subdomain": "_vercel.${sub || "<name>"}" in domains/_vercel.${sub || "<name>"}.${zone || "<zone>"}.json.` +
+        ` Current name: ${ownName}.`,
+    });
+  }
+  return warnings;
 }
 
 // One DNS label: optional leading underscore (e.g. _acme-challenge), then
@@ -535,6 +623,35 @@ function checkOwnedBase(file, entry, subOwners) {
   }
 }
 
+function checkNonJsonClaims(problems) {
+  if (!fs.existsSync(DOMAINS_DIR)) return;
+  for (const name of fs.readdirSync(DOMAINS_DIR).sort()) {
+    if (name.startsWith(".") || name.toLowerCase().endsWith(".json")) continue;
+    const full = path.join(DOMAINS_DIR, name);
+    let stat;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) continue;
+    let looksLikeClaim = false;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(full, "utf8"));
+      looksLikeClaim = isPlainObject(parsed) && ("domain" in parsed || "subdomain" in parsed || "owner" in parsed);
+    } catch {
+      looksLikeClaim = false;
+    }
+    if (!looksLikeClaim) continue;
+    problems.push({
+      file: name,
+      message:
+        `${name}: this is a registry entry without a .json extension, so the validator ` +
+        `and the DNS config glob both skip it; rename it to "${name}.json"`,
+    });
+  }
+}
+
 function checkMisplacedRootFiles() {
   const knownRootConfigs = new Set([
     "package.json",
@@ -560,50 +677,115 @@ function checkMisplacedRootFiles() {
   }
 }
 
-function main() {
-  checkMisplacedRootFiles();
-  const meta = loadMeta();
+function snapshotState(seen, claims, subOwners) {
+  return { seen: new Set(seen), claims: new Map(claims), subOwners: new Map(subOwners) };
+}
 
-  if (!fs.existsSync(DOMAINS_DIR)) fail(`domains/ directory not found`);
+function restoreState(seen, claims, subOwners, snap) {
+  seen.clear();
+  snap.seen.forEach((v) => seen.add(v));
+  claims.clear();
+  snap.claims.forEach((v, k) => claims.set(k, v));
+  subOwners.clear();
+  snap.subOwners.forEach((v, k) => subOwners.set(k, v));
+}
+
+function main() {
+  const problems = [];
+
+  try {
+    checkMisplacedRootFiles();
+  } catch (err) {
+    if (!isValidationError(err)) throw err;
+    problems.push({ file: null, message: err.message });
+  }
+
+  checkNonJsonClaims(problems);
+
+  let meta;
+  try {
+    meta = loadMeta();
+  } catch (err) {
+    if (!isValidationError(err)) throw err;
+    problems.push({ file: null, message: err.message });
+  }
+
+  if (!meta) return report(problems, [], []);
+  if (!fs.existsSync(DOMAINS_DIR)) {
+    problems.push({ file: null, message: "domains/ directory not found" });
+    return report(problems, [], []);
+  }
 
   const files = fs.readdirSync(DOMAINS_DIR)
     .filter((f) => f.endsWith(".json") && !RESERVED_FILENAMES.has(f))
     .sort();
 
-  if (files.length === 0) {
-    console.log("validate: registry is empty, nothing to validate");
-    return;
-  }
-
   const seen = new Set();
   const claims = new Map();
   const subOwners = new Map();
   const entries = [];
-  let count = 0;
+  const warnings = [];
 
   // Pass 1: parse and validate every file. Wildcard base checks need the
   // full claim map, so they run afterwards.
   for (const file of files) {
     const full = path.join(DOMAINS_DIR, file);
+    const snap = snapshotState(seen, claims, subOwners);
     let parsed;
     try {
       parsed = JSON.parse(fs.readFileSync(full, "utf8"));
     } catch (err) {
-      fail(`${file}: invalid JSON, ${err.message}`);
+      problems.push({ file, message: `${file}: invalid JSON, ${err.message}` });
+      continue;
     }
-    validateEntry(file, parsed, meta, seen, claims, subOwners);
+    const preflight = preflightEntry(file, parsed, meta);
+    if (preflight.length > 0) {
+      problems.push(...preflight);
+      continue;
+    }
+    warnings.push(...advisoryCheck(file, parsed));
+    try {
+      validateEntry(file, parsed, meta, seen, claims, subOwners);
+    } catch (err) {
+      if (!isValidationError(err)) throw err;
+      restoreState(seen, claims, subOwners, snap);
+      problems.push({ file, message: err.message });
+      continue;
+    }
     entries.push({ file, entry: parsed });
-    count += 1;
-    console.log(`validate: ok, ${file}`);
+    if (!JSON_MODE) console.log(`validate: ok, ${file}`);
   }
 
   // Pass 2: every wildcard and every underscore-prefixed name must sit on top
   // of the owner's own claim.
   for (const { file, entry } of entries) {
-    checkOwnedBase(file, entry, subOwners);
+    try {
+      checkOwnedBase(file, entry, subOwners);
+    } catch (err) {
+      if (!isValidationError(err)) throw err;
+      problems.push({ file, message: err.message });
+    }
   }
 
-  console.log(`validate: ${count} entr(y/ies) verified`);
+  report(problems, entries.map((e) => e.file), warnings);
+}
+
+function report(problems, verified, warnings = []) {
+  if (JSON_MODE) {
+    const payload = { ok: problems.length === 0, verified, problems, warnings };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  } else {
+    for (const problem of problems) console.error(`validate: ${problem.message}`);
+    for (const warning of warnings) console.error(`validate: warning: ${warning.message}`);
+    if (problems.length > 0) {
+      console.error(`validate: ${problems.length} problem(s) found`);
+    } else if (verified.length === 0) {
+      console.log("validate: registry is empty, nothing to validate");
+    } else {
+      console.log(`validate: ${verified.length} entr(y/ies) verified`);
+    }
+  }
+  if (problems.length > 0) process.exit(1);
 }
 
 main();
