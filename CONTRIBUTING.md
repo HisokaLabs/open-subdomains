@@ -77,6 +77,50 @@ registry, where everything runs on Linux and CI. If you develop on Windows,
 add wildcard entries through the GitHub web interface instead of a local
 clone.
 
+### Pointing at Vercel
+
+A Vercel project is attached with `CNAME: ["<hash>.vercel-dns-017.com"]`, or the
+short form `cname.vercel-dns.com` when you start fresh. The hash Vercel prints on the
+Domains panel replaces the short form, and it is what `dnscontrol push` publishes.
+
+When the name is already linked to a **different** Vercel account, the panel adds a
+banner and a second row:
+
+```
+TXT   _vercel   vc-domain-verify=<label>.is-a.ceo,<token>
+```
+
+The banner sentence says `add a TXT record at _vercel.is-a.ceo`. That sentence is the
+zone, not the target. The row is the record, and it resolves to
+`_vercel.<label>.is-a.ceo`. The registry only accepts the record: `validate.js` pins a
+proof to the name it verifies, so a proof for `holder.is-a.ceo` counts on
+`_vercel.holder.is-a.ceo` and nowhere else.
+
+The proof cannot sit in your own file either. `holder.is-a.ceo` already carries a
+CNAME, and DNS forbids a CNAME and a TXT on the same name, so `dnscontrol push` would
+fail after merge. The proof gets its own entry, one label deeper, owned by you:
+
+```bash
+node scripts/vercel-proof.js --name holder --token <token>
+```
+
+That writes `domains/_vercel.holder.is-a.ceo.json`, checks it against the validator,
+and prints the next three steps. `--proof "vc-domain-verify=holder.is-a.ceo,<token>"`
+takes the whole line instead of just the token, `--list` shows every sidecar already in
+the registry, and `--remove` deletes the sidecar and nothing else. Pass `--dry-run` to
+see the file without writing it.
+
+Commit the two files together: your own `<label>.is-a.ceo.json` (if you are claiming
+the name in the same PR) and `_vercel.<label>.is-a.ceo.json` (if Vercel already shows
+the banner). After the merge and the DNS push, press Verify in Vercel, wait for
+**Valid Configuration**, then run `--remove` in a second PR. The TXT is only needed
+until the domain is attached; deleting it afterwards does not detach anything.
+
+A dotted name whose first label starts with `_` is an **auxiliary** entry: it is
+exempt from the one-name-per-person quota and from the base-claim rule, and its owner
+must still be your own GitHub username. `verify-owners.js` checks that like any other
+file, so a sidecar for someone else's name is refused.
+
 A CNAME cannot share a name with any other record type: no `A`, `AAAA`, `MX`,
 `NS`, `SRV`, or `PTR` next to it. That is a DNS rule, not a registry one.
 `TXT` and `CAA` are the two that may sit alongside a CNAME.

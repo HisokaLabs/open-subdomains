@@ -349,6 +349,106 @@ test("a Vercel proof under its own name passes", () => {
   assert.equal(accepts(owned).code, 0);
 });
 
+test("a Vercel proof on the claim's own name is rejected", () => {
+  const inline = labelled("holder", {
+    owner: "holder",
+    records: { CNAME: ["holder.vercel.app"], TXT: ["vc-domain-verify=holder.is-a.ceo,deadbeef"] },
+  });
+  rejects({ "holder.is-a.ceo.json": inline }, /only counts on "_vercel\.holder\.is-a\.ceo"/);
+});
+
+test("a Vercel proof on the zone root is rejected", () => {
+  const root = labelled("_vercel", {
+    owner: "holder",
+    records: { TXT: ["vc-domain-verify=holder.is-a.ceo,deadbeef"] },
+  });
+  rejects({ "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }), "_vercel.is-a.ceo.json": root }, /zone-wide name, so maintainers hold it/);
+});
+
+test("a Vercel sidecar cannot point at another person's name", () => {
+  const stolen = labelled("_vercel.holder", {
+    owner: "attacker",
+    records: { TXT: ["vc-domain-verify=holder.is-a.ceo,deadbeef"] },
+  });
+  rejects({ "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }), "_vercel.holder.is-a.ceo.json": stolen }, /claimed by the same owner/);
+});
+
+test("vercel-proof writes the sidecar from a bare token", () => {
+  const dir = makeRegistry({ "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }) });
+  const result = spawnSync(process.execPath, [path.join(dir, "scripts", "vercel-proof.js"), "--name", "holder", "--token", "deadbeef"], {
+    encoding: "utf8",
+    cwd: dir,
+  });
+  const written = path.join(dir, "domains", "_vercel.holder.is-a.ceo.json");
+  const body = JSON.parse(fs.readFileSync(written, "utf8"));
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(body.subdomain, "_vercel.holder");
+  assert.equal(body.owner, "holder");
+  assert.deepEqual(body.records.TXT, ["vc-domain-verify=holder.is-a.ceo,deadbeef"]);
+});
+
+test("vercel-proof refuses a proof minted for another name", () => {
+  const dir = makeRegistry({ "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }) });
+  const result = spawnSync(
+    process.execPath,
+    [path.join(dir, "scripts", "vercel-proof.js"), "--name", "holder", "--proof", "vc-domain-verify=other.is-a.ceo,deadbeef"],
+    { encoding: "utf8", cwd: dir },
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /verifies "other\.is-a\.ceo"/);
+});
+
+test("vercel-proof keeps every proof already in the sidecar", () => {
+  const dir = makeRegistry({
+    "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }),
+    "_vercel.holder.is-a.ceo.json": labelled("_vercel.holder", {
+      owner: "holder",
+      records: { TXT: ["vc-domain-verify=holder.is-a.ceo,aaa111"] },
+    }),
+  });
+  const result = spawnSync(process.execPath, [path.join(dir, "scripts", "vercel-proof.js"), "--name", "holder", "--token", "bbb222"], {
+    encoding: "utf8",
+    cwd: dir,
+  });
+  const body = JSON.parse(fs.readFileSync(path.join(dir, "domains", "_vercel.holder.is-a.ceo.json"), "utf8"));
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(body.records.TXT, ["vc-domain-verify=holder.is-a.ceo,aaa111", "vc-domain-verify=holder.is-a.ceo,bbb222"]);
+});
+
+test("vercel-proof --remove drops only the sidecar", () => {
+  const dir = makeRegistry({
+    "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }),
+    "_vercel.holder.is-a.ceo.json": labelled("_vercel.holder", {
+      owner: "holder",
+      records: { TXT: ["vc-domain-verify=holder.is-a.ceo,deadbeef"] },
+    }),
+  });
+  const result = spawnSync(process.execPath, [path.join(dir, "scripts", "vercel-proof.js"), "--name", "holder", "--remove"], {
+    encoding: "utf8",
+    cwd: dir,
+  });
+  const sidecarGone = !fs.existsSync(path.join(dir, "domains", "_vercel.holder.is-a.ceo.json"));
+  const claimKept = fs.existsSync(path.join(dir, "domains", "holder.is-a.ceo.json"));
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(sidecarGone, true);
+  assert.equal(claimKept, true);
+});
+
+test("vercel-proof refuses a name nobody claimed", () => {
+  const dir = makeRegistry({ "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }) });
+  const result = spawnSync(process.execPath, [path.join(dir, "scripts", "vercel-proof.js"), "--name", "ghost", "--token", "deadbeef"], {
+    encoding: "utf8",
+    cwd: dir,
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /claim the name first/);
+});
+
 test("a service SRV record needs no base claim", () => {
   const entry = labelled("_minecraft._tcp.mc", {
     records: { SRV: [{ priority: 0, weight: 5, port: 25565, target: "mc.example.com" }] },
