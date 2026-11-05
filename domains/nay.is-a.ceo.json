@@ -1,10 +1,10 @@
 {
   "domain": "is-a.ceo",
-  "subdomain": "me",
+  "subdomain": "nay",
   "owner": "soudayonee",
   "proxied": false,
   "repo": "github.com/soudayonee",
-  "description": "Me Is A CEO",
+  "description": "NAY Is A CEO",
   "records": {
     "CNAME": ["8b2220d546ccbf0e.vercel-dns-017.com"]
   }
