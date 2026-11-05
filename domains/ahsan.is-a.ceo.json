@@ -1,0 +1,11 @@
+{
+  "$schema": "./SCHEMA.json",
+  "domain": "is-a.ceo",
+  "subdomain": "ahsan",
+  "owner": "Yz776",
+  "repo": "github.com/Yz776/informatika",
+  "description": "Personal website.",
+  "records": {
+    "A": ["75.2.60.5"]
+  }
+}
