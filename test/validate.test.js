@@ -264,7 +264,7 @@ test("a zone-wide record does not consume its holder's quota", () => {
     "www.is-a.ceo.json": labelled("www", { owner: "HisokaLabs", records: { CNAME: ["hisokalabs.github.io"] } }),
     "_vercel.is-a.ceo.json": labelled("_vercel", {
       owner: "HisokaLabs",
-      records: { TXT: ["vc-domain-verify=nay.is-a.ceo,x"] },
+      records: { TXT: ["vc-domain-verify=anyone.is-a.ceo,x"] },
     }),
   };
   assert.equal(accepts(files).code, 0);
@@ -272,10 +272,10 @@ test("a zone-wide record does not consume its holder's quota", () => {
 
 test("a dotted underscore record is not zone-wide", () => {
   const owned = {
-    "nay.is-a.ceo.json": labelled("nay", { owner: "someone" }),
-    "_vercel.nay.is-a.ceo.json": labelled("_vercel.nay", {
-      owner: "someone",
-      records: { TXT: ["vc-domain-verify=nay.is-a.ceo,x"] },
+    "holder.is-a.ceo.json": labelled("holder", { owner: "holder" }),
+    "_vercel.holder.is-a.ceo.json": labelled("_vercel.holder", {
+      owner: "holder",
+      records: { TXT: ["vc-domain-verify=holder.is-a.ceo,x"] },
     }),
   };
   assert.equal(accepts(owned).code, 0);
