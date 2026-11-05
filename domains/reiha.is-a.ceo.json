@@ -1,1 +1,16 @@
-{"domain":"is-a.ceo","subdomain":"reiha","owner":"shuu-arch","repo":"https://github.com/shuu-arch/reihaproject","description":"Reiha Project."}
+{
+  "domain": "is-a.ceo",
+  "subdomain": "reihaa",
+  "owner": "shuu-arch",
+  "email": "thecatiscrazy2434@gmail.com",
+  "repo": "https://github.com/shuu-arch/reihaproject",
+  "description": "One line describing what runs here.",
+  "records": {
+    "CNAME": [
+      "d65e3912081155d7.vercel-dns-017.com."
+    ],
+    "TXT": [
+      "vc-domain-verify=reiha.is-a.ceo,2f00052380214b757dec"
+    ]
+  }
+}
