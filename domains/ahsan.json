@@ -1,15 +1,11 @@
 {
+  "$schema": "./SCHEMA.json",
   "domain": "is-a.ceo",
-  "subdomain": "yz776",
-  "owner": {
-    "username": "Yz776",
-    "email": "aksan080821@gmail.com"
-  },
-  "repo": "github.com/Yz776",
+  "subdomain": "ahsan",
+  "owner": "Yz776",
+  "repo": "github.com/Yz776/informatika",
+  "description": "Personal website.",
   "records": {
-    "A": [
-      "75.2.60.5"
-    ]
-  },
-  "description": "Ingin menjadi CEO."
+    "A": ["75.2.60.5"]
+  }
 }
