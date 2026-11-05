@@ -1,0 +1,9 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "_vercel.nay",
+  "owner": "soudayonee",
+  "description": "NAY Is A CEO",
+  "records": {
+    "TXT": ["vc-domain-verify=nay.is-a.ceo,f75bae0a0d0c2f230264"]
+  }
+}
