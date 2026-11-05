@@ -1,4 +1,5 @@
 {
+  "$schema": "./SCHEMA.json",
   "domain": "is-a.ceo",
   "subdomain": "irfan",
   "owner": "rtwone",
