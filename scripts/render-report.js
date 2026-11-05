@@ -21,6 +21,7 @@ const FIELD_HINTS = [
   { test: /invalid JSON/, key: "json" },
   { test: /already has .* one subdomain per person/, key: "quota" },
   { test: /is reserved by the registry|is blocked by the registry/, key: "reserved" },
+  { test: /keeps those names unclaimed/, key: "reserved-word" },
   { test: /not a public IPv4|not a public IPv6/, key: "private-ip" },
   { test: /is not a valid public CNAME target|not a public hostname/, key: "target" },
   { test: /needs .* claimed by the same owner/, key: "base" },
@@ -74,6 +75,8 @@ const NOTES = {
     "One subdomain per person per zone. Close this PR if you already hold one, or pick a different zone.",
   reserved:
     "Reserved and blocked labels are never granted. Anything that looks like impersonation or phishing is blocked outright.",
+  "reserved-word":
+    "Some names are refused by the kind of word they are rather than by a list. Pronouns (`me`, `we`, `they`, `you`), articles (`the`, `this`), and grammar words describe the reader, not you, so they are never granted. Pick the GitHub handle the record points at.",
   "private-ip":
     "Records must be reachable from the public internet. Loopback, RFC 1918, link-local and CGNAT addresses are rejected.",
   target:
@@ -188,7 +191,9 @@ function renderReport({ report, prAuthor, prNumber }) {
   }
 
   const firstFile = problems.find((p) => p.file && p.file !== "repository");
-  const label = firstFile ? subdomainFromFile(firstFile.file) : "";
+  const firstLabel = firstFile ? subdomainFromFile(firstFile.file) : "";
+  const labelIsTheProblem = kinds.has("reserved-word") || kinds.has("reserved");
+  const label = labelIsTheProblem ? "" : firstLabel;
   lines.push("### What a valid file looks like");
   lines.push("");
   lines.push("```json");
