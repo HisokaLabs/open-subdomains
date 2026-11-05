@@ -4,12 +4,17 @@ DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/Hi
 
 ## Claim a subdomain
 
+DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/HisokaLabs/dnscontrol-actions).
+
 1. Fork this repository and create a branch.
 2. Copy [`domains/_example.json`](domains/_example.json) to
    `domains/<your-subdomain>.is-a.ceo.json` (for example `mc.is-a.ceo.json`).
    The filename must be exactly `<subdomain>.<zone>.json`.
-3. Open a pull request against `main`. The `check` workflow validates your entry.
-4. When it merges, the zone is pushed to Cloudflare within a minute or two.
+3. Run `npm run check` and `npm test` locally so you see the same verdict as CI.
+4. Open a pull request against `main` and fill in the template. The `check`
+   workflow validates the entry, confirms `owner` is your own GitHub username,
+   and previews the DNS diff.
+5. When it merges, the zone is pushed to Cloudflare within a minute or two.
 
 ### The file
 

@@ -195,6 +195,11 @@ const LOCAL_SUFFIXES = new Set([
   "invalid", // RFC 2606
 ]);
 
+/** True when the host is one of the suffixes or sits underneath it. */
+function hasLocalSuffix(host) {
+  return [...LOCAL_SUFFIXES].some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
 /**
  * Record targets (CNAME/MX/NS/SRV/PTR) must be real public hostnames: at
  * least two labels, not an IP literal, and not a local-only name.
@@ -204,7 +209,7 @@ function validTarget(value) {
   const host = value.toLowerCase().replace(/\.$/, "");
   const labels = host.split(".");
   if (labels.length < 2) return false;
-  if (LOCAL_SUFFIXES.has(labels[labels.length - 1])) return false;
+  if (hasLocalSuffix(host)) return false;
   if (/^\d+$/.test(labels[labels.length - 1])) return false; // IP literal, not a name
   return true;
 }

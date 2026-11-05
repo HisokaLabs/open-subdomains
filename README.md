@@ -37,7 +37,7 @@ This part is for maintainers and anyone curious about the plumbing. Claiming a s
 ### How a change flows through
 
 ```
-pull request -> check.yml (validate, verify owner, dnscontrol check)
+pull request -> check.yml (validate, test, verify owner, dnscontrol check)
              -> merge to main -> push.yml (dnscontrol push) -> Cloudflare
 ```
 
@@ -55,10 +55,20 @@ The zones this registry is allowed to touch are listed in `domains/_meta.json` u
 | `scripts/validate.js` | The strict validator. Fails CI on any rule violation. |
 | `scripts/verify-owners.js` | PR-author check. Owner must match the claimant. |
 | `scripts/health-check.js` | Probes every zone's SOA and reports the dead ones. |
+| `test/validate.test.js` | Node test suite covering every validator rule. `npm test`. |
+| `.github/pull_request_template.md` | The form every pull request fills in. |
 | `.github/workflows/` | check, push, health, stale, label. |
 
 The registry ships with two infrastructure entries, `@.is-a.ceo.json` (zone apex, the website's GitHub Pages records) and `www.is-a.ceo.json`. Apex records are ordinary entries here, not a separate config file.
 
+### Run the tests
+
+```bash
+npm run check   # validate the real registry in domains/
+npm test        # the validator test suite, 28 cases, no dependencies
+```
+
+The suite builds each fixture in a temporary directory, runs `scripts/validate.js` against it, and asserts the exit code, so the real registry is never touched. Every rule in `CONTRIBUTING.md` has a case: private and reserved addresses, IPv4-mapped IPv6, CNAME exclusivity, duplicate values, reserved labels, the one-name-per-owner quota, wildcard and underscore base ownership, and the owner-matches-PR-author check. Two wildcard cases are skipped on Windows because the operating system forbids `*` in a filename; they run on CI.
 ### Adding a zone
 
 1. Add the zone to the same Cloudflare account and make sure the `CLOUDFLARE_API_TOKEN` secret can edit its DNS.

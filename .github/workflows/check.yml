@@ -29,13 +29,13 @@ jobs:
           touched=false
           for page in 1 2 3 4 5 6 7 8 9 10; do
             body=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/$REPO/pulls/$PR/files?per_page=100&page=$page")
-            count=$(printf '%s' "$body" | grep -c '"filename"')
-            if printf '%s' "$body" | grep -qE '"filename": *"(domains/|scripts/|dnsconfig\.js|package\.json)'; then
+              "https://api.github.com/repos/$REPO/pulls/$PR/files?per_page=100&page=$page") || exit 1
+            if printf '%s' "$body" | grep -qE '"filename": *"(domains/|scripts/|test/|dnsconfig\.js|package\.json)'; then
               touched=true
               break
             fi
-            [ "$count" -lt 100 ] && break
+            count=$(printf '%s' "$body" | grep -c '"filename"' || true)
+            if [ "$count" -lt 100 ]; then break; fi
           done
           echo "registry=$touched" >> "$GITHUB_OUTPUT"
           if [ "$touched" = 'false' ]; then
@@ -55,6 +55,10 @@ jobs:
       - if: steps.filter.outputs.registry == 'true'
         name: Validate domains/*.json
         run: npm run check
+
+      - if: steps.filter.outputs.registry == 'true'
+        name: Run the validator test suite
+        run: npm test
 
       - if: steps.filter.outputs.registry == 'true' && github.event_name == 'pull_request'
         name: Verify entry owners match the PR author
