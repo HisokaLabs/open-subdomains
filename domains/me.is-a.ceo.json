@@ -1,0 +1,11 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "me",
+  "owner": "soudayonee",
+  "proxied": false,
+  "repo": "github.com/soudayonee",
+  "description": "Me Is A CEO",
+  "records": {
+    "CNAME": ["8b2220d546ccbf0e.vercel-dns-017.com"]
+  }
+}

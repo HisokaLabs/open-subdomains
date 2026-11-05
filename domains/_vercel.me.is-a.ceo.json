@@ -1,0 +1,9 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "_vercel.me",
+  "owner": "soudayonee",
+  "description": "Me Is A CEO",
+  "records": {
+    "TXT": ["vc-domain-verify=me.is-a.ceo,45e7ceae4c890cc59bab"]
+  }
+}
