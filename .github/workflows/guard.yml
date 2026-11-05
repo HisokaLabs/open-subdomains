@@ -1,0 +1,113 @@
+name: guard
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: subdomain-guard
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Catch two subdomains serving one site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Probe every entry
+        id: probe
+        continue-on-error: true
+        run: |
+          node scripts/status.js --json --strict > /tmp/status.json
+          exit_code=$?
+          cat /tmp/status.json
+          exit $exit_code
+
+      - name: File the takeover issue
+        if: steps.probe.outcome == 'failure'
+        uses: actions/github-script@v9
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const marker = '<!-- subdomain-guard -->';
+            let report = { collisions: [] };
+            try { report = JSON.parse(fs.readFileSync('/tmp/status.json', 'utf8')); } catch {}
+            const groups = report.collisions || [];
+            if (groups.length === 0) {
+              core.notice('no collisions parsed, leaving issues alone');
+              return;
+            }
+            const lines = groups.map((g) => `- ${g.names.map((n) => '`' + n + '`').join(' and ')} serve byte-identical pages (${g.digest})`);
+            const body = [
+              marker,
+              'At least two registry entries answer with the same page, which means one of them',
+              'is pointed at a Vercel project it does not own. A `vc-domain-verify` TXT that was',
+              'pasted from another account finishes that account\'s ownership proof for the name.',
+              '',
+              ...lines,
+              '',
+              `Latest run: ${process.env.RUN_URL}`,
+              '',
+              'This issue closes itself once every entry serves its own page.',
+            ].join('\n');
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find((i) => i.body && i.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Subdomain guard: one page is being served under two names',
+                body,
+                labels: ['zone-health'],
+              });
+            }
+
+      - name: Close the takeover issue
+        if: steps.probe.outcome == 'success'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const marker = '<!-- subdomain-guard -->';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            for (const issue of issues.filter((i) => i.body && i.body.includes(marker))) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: 'Every entry serves its own page again; closing.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }

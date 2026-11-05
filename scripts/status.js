@@ -124,6 +124,7 @@ async function main() {
   const report = { zone, checked: new Date().toISOString(), collisions, rows };
   if (process.argv.includes("--json")) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    if (collisions.length > 0 && process.argv.includes("--strict")) process.exitCode = 1;
     return;
   }
   const width = Math.max(...rows.map((row) => row.name.length));
@@ -134,6 +135,11 @@ async function main() {
       `${row.name.padEnd(width)}  ${code}  ${row.owner.padEnd(14)}  ${row.verdict}\n` +
         `${" ".repeat(width)}        targets ${declared || "none"}\n`,
     );
+  }
+  if (collisions.length > 0) {
+    process.stdout.write(`\n${collisions.length} content collision(s):\n`);
+    for (const group of collisions) process.stdout.write(`  ${group.names.join(" = ")}  (${group.digest})\n`);
+    if (process.argv.includes("--strict")) process.exitCode = 1;
   }
 }
 
