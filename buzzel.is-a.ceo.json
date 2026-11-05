@@ -1,0 +1,9 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "buzzel",
+  "owner": "fasoft9-star",
+  "description": "Landing page project",
+  "records": {
+    "A": ["38.47.85.234"]
+  }
+}
