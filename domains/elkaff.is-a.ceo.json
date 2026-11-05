@@ -1,0 +1,11 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "elkaff",
+  "owner": "elkhaff",
+  "proxied": false,
+  "repo": "github.com/elkhaff",
+  "description": "Gwehj CEO",
+  "records": {
+    "CNAME": ["62873a1b0171cbc0.vercel-dns-017.com"]
+  }
+}
