@@ -84,6 +84,23 @@ Single-label claims are checked against the reserved and blocked lists in
 `domains/_meta.json`. Dotted, wildcard, and apex names skip that check
 because they are specific already.
 
+The label also has to be a name, not a word. Pronouns (`me`, `we`, `they`,
+`you`, `us`, `him`, `her`, `them`), determiners (`the`, `this`, `any`,
+`every`), and grammar words (`and`, `if`, `not`, `what`) are refused by the
+kind of word they are, so no list has to grow to keep up with them. The rule
+lives in `scripts/name-classes.js` and is enabled per class in
+`namePolicy.reservedClasses`, so a new class of generic word is one entry
+away. Leetspeak and doubled letters do not dodge it: `M3`, `m3`, and `meee`
+all resolve to `me`.
+
+Generic vocabulary (`home`, `blog`, `app`, `shop`, `docs`) is not refused,
+because a few of those read as a real handle. It raises an advisory warning
+instead, and a maintainer will almost always ask for your GitHub handle,
+since a shared word can only be claimed once.
+
+Pick the label that matches the GitHub account the record points at. That is
+the only name no one else can make a claim to.
+
 Records must point at the public internet: A/AAAA have to be public IPs
 (loopback, RFC 1918, link-local, CGNAT, and other internal ranges are
 rejected, because a public name pointing into a private network is a DNS-rebinding

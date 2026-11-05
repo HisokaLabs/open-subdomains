@@ -65,10 +65,10 @@ The registry ships with two infrastructure entries, `@.is-a.ceo.json` (zone apex
 
 ```bash
 npm run check   # validate the real registry in domains/
-npm test        # the validator test suite, 28 cases, no dependencies
+npm test        # the validator test suite, 63 cases, no dependencies
 ```
 
-The suite builds each fixture in a temporary directory, runs `scripts/validate.js` against it, and asserts the exit code, so the real registry is never touched. Every rule in `CONTRIBUTING.md` has a case: private and reserved addresses, IPv4-mapped IPv6, CNAME exclusivity, duplicate values, reserved labels, the one-name-per-owner quota, wildcard and underscore base ownership, and the owner-matches-PR-author check. Two wildcard cases are skipped on Windows because the operating system forbids `*` in a filename; they run on CI.
+The suite builds each fixture in a temporary directory, runs `scripts/validate.js` against it, and asserts the exit code, so the real registry is never touched. Every rule in `CONTRIBUTING.md` has a case: private and reserved addresses, IPv4-mapped IPv6, CNAME exclusivity, duplicate values, reserved labels, name classes (a pronoun, a determiner, a generic word), the one-name-per-owner quota, wildcard and underscore base ownership, and the owner-matches-PR-author check. Two wildcard cases are skipped on Windows because the operating system forbids `*` in a filename; they run on CI.
 ### Adding a zone
 
 1. Add the zone to the same Cloudflare account and make sure the `CLOUDFLARE_API_TOKEN` secret can edit its DNS.
