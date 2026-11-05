@@ -107,6 +107,30 @@ function changedFiles() {
   return [];
 }
 
+function readFromBase(file, base) {
+  const refs = [`origin/${base}`, base];
+  for (const ref of refs) {
+    const raw = runGit(["show", `${ref}:${file}`]);
+    if (raw === null) continue;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function baseOwnerUsername(parsed) {
+  const entries = Array.isArray(parsed) ? parsed : [parsed];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const raw = getRawOwner(entry);
+    if (raw && raw.trim().length > 0) return normalizeUsername(raw);
+  }
+  return "";
+}
+
 function main() {
   const prAuthor = process.env.PR_AUTHOR;
   if (!prAuthor) {
@@ -128,6 +152,7 @@ function main() {
   }
 
   const mismatches = [];
+  const takeovers = [];
 
   for (const file of files) {
     const full = path.resolve(ROOT, file);
@@ -152,6 +177,18 @@ function main() {
         mismatches.push(`${file}: owner "${rawOwner}" does not match the PR author "${prAuthor}"`);
       }
     }
+
+    const baseEntry = readFromBase(file, process.env.GITHUB_BASE_REF || "main");
+    if (baseEntry) {
+      const previous = baseOwnerUsername(baseEntry);
+      const current = baseOwnerUsername(parsed);
+      if (previous && current && previous !== current) {
+        takeovers.push(
+          `${file}: owner changes from "${previous}" to "${current}"; an existing claim cannot change hands ` +
+            `through a pull request. Ask a maintainer to transfer it`
+        );
+      }
+    }
   }
 
   if (mismatches.length > 0) {
@@ -161,6 +198,12 @@ function main() {
       "\nIf you are claiming this subdomain for someone else, ask them to open the PR " +
         "themselves, or set \"owner\" to your own username."
     );
+    process.exit(1);
+  }
+
+  if (takeovers.length > 0) {
+    console.error("verify-owners: an existing subdomain cannot be reassigned by rewriting its file.");
+    takeovers.forEach((t) => console.error(`  - ${t}`));
     process.exit(1);
   }
 

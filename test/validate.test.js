@@ -61,6 +61,40 @@ function makeRegistry(files) {
   return dir;
 }
 
+function gitAvailable() {
+  return spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
+}
+
+function gitRun(dir, args) {
+  const result = spawnSync("git", args, {
+    cwd: dir,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "fixture",
+      GIT_AUTHOR_EMAIL: "fixture@example.com",
+      GIT_COMMITTER_NAME: "fixture",
+      GIT_COMMITTER_EMAIL: "fixture@example.com",
+    },
+  });
+  assert.equal(result.status, 0, `git ${args.join(" ")} failed:
+${result.stderr}`);
+  return result.stdout;
+}
+
+function makeGitRegistry(files, mutate) {
+  const dir = makeRegistry({});
+  gitRun(dir, ["init", "-q", "-b", "main"]);
+  for (const [file, content] of Object.entries(files)) {
+    fs.writeFileSync(path.join(dir, "domains", file), JSON.stringify(content, null, 2));
+  }
+  gitRun(dir, ["add", "-A"]);
+  gitRun(dir, ["commit", "-q", "-m", "base"]);
+  gitRun(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+  mutate(dir);
+  return dir;
+}
+
 function run(dir, script, env) {
   const result = spawnSync(process.execPath, [path.join(dir, "scripts", script)], {
     encoding: "utf8",
@@ -329,6 +363,55 @@ test("verify-owners accepts a claim by the PR author, case-insensitively", () =>
 test("verify-owners allows maintainers to edit any entry", () => {
   const dir = makeRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "regular-user" }) });
   assert.equal(run(dir, "verify-owners.js", { PR_AUTHOR: "dikaardnt" }).code, 0);
+});
+
+test("verify-owners rejects rewriting an existing entry to a new owner", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "original-owner" }) }, (root) => {
+    const target = path.join(root, "domains", "web.is-a.ceo.json");
+    const entry = JSON.parse(fs.readFileSync(target, "utf8"));
+    entry.owner = "attacker";
+    fs.writeFileSync(target, JSON.stringify(entry, null, 2));
+    gitRun(root, ["commit", "-qam", "take over"]);
+  });
+  const { code, out } = run(dir, "verify-owners.js", { PR_AUTHOR: "attacker", GITHUB_BASE_REF: "main" });
+  assert.equal(code, 1);
+  assert.match(out, /cannot be reassigned/);
+});
+
+test("verify-owners lets an owner update their own records", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "original-owner" }) }, (root) => {
+    const target = path.join(root, "domains", "web.is-a.ceo.json");
+    const entry = JSON.parse(fs.readFileSync(target, "utf8"));
+    entry.records = { CNAME: ["moved.example.com"] };
+    fs.writeFileSync(target, JSON.stringify(entry, null, 2));
+    gitRun(root, ["commit", "-qam", "move"]);
+  });
+  assert.equal(run(dir, "verify-owners.js", { PR_AUTHOR: "original-owner", GITHUB_BASE_REF: "main" }).code, 0);
+});
+
+test("the report explains a takeover instead of a blank failure", { skip: !gitAvailable() }, () => {
+  const dir = makeGitRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "original-owner" }) }, (root) => {
+    const target = path.join(root, "domains", "web.is-a.ceo.json");
+    const entry = JSON.parse(fs.readFileSync(target, "utf8"));
+    entry.owner = "attacker";
+    fs.writeFileSync(target, JSON.stringify(entry, null, 2));
+    gitRun(root, ["commit", "-qam", "take over"]);
+  });
+  const result = spawnSync(process.execPath, [path.join(dir, "scripts", "pr-report.js")], {
+    encoding: "utf8",
+    cwd: dir,
+    env: {
+      ...process.env,
+      PR_AUTHOR: "attacker",
+      PR_NUMBER: "9",
+      CHANGED_FILES: JSON.stringify(["domains/web.is-a.ceo.json"]),
+      GITHUB_BASE_REF: "main",
+    },
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /already belongs to "original-owner"/);
+  assert.match(result.stdout, /Only a maintainer can transfer a name/);
 });
 
 test("CNAME target with a trailing dot passes validation", () => {

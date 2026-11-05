@@ -24,15 +24,27 @@ function parseOwnerMismatches(stderr) {
     const line = raw.trim();
     if (!line.startsWith("- ")) continue;
     const body = line.slice(2);
-    const match = /^(.+?):\s+owner "(.+?)" does not match the PR author "(.+?)"/.exec(body);
-    if (!match) continue;
-    const file = match[1].replace(/\\/g, "/").split("/").pop();
-    problems.push({
-      file,
-      message:
-        `${file}: owner "${match[2]}" does not match the PR author "${match[3]}"; ` +
-        `"owner" must be your own GitHub username, or the owner has to open the PR`,
-    });
+    const mismatch = /^(.+?):\s+owner "(.+?)" does not match the PR author "(.+?)"/.exec(body);
+    if (mismatch) {
+      const file = mismatch[1].replace(/\\/g, "/").split("/").pop();
+      problems.push({
+        file,
+        message:
+          `${file}: owner "${mismatch[2]}" does not match the PR author "${mismatch[3]}"; ` +
+          `"owner" must be your own GitHub username, or the owner has to open the PR`,
+      });
+      continue;
+    }
+    const takeover = /^(.+?):\s+owner changes from "(.+?)" to "(.+?)"/.exec(body);
+    if (takeover) {
+      const file = takeover[1].replace(/\\/g, "/").split("/").pop();
+      problems.push({
+        file,
+        message:
+          `${file}: this name already belongs to "${takeover[2]}" on main, so it cannot be reassigned to ` +
+          `"${takeover[3]}" through a pull request; pick your own subdomain`,
+      });
+    }
   }
   return problems;
 }
@@ -44,7 +56,6 @@ function readChangedFiles() {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed.filter((f) => typeof f === "string");
   } catch {
-    // Not JSON: the workflow passes one filename per line.
   }
   return raw
     .split("\n")
