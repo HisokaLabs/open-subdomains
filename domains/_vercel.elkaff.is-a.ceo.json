@@ -1,0 +1,11 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "_vercel.elkaff",
+  "owner": "elkhaff",
+  "description": "Gwehj adalah CEO kayaknya",
+  "records": {
+    "TXT": [
+      "vc-domain-verify=elkaff.is-a.ceo,c5ad065804b06bf9e510"
+    ]
+  }
+}
