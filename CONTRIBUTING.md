@@ -94,7 +94,10 @@ The banner sentence says `add a TXT record at _vercel.is-a.ceo`. That sentence i
 zone, not the target. The row is the record, and it resolves to
 `_vercel.<label>.is-a.ceo`. The registry only accepts the record: `validate.js` pins a
 proof to the name it verifies, so a proof for `holder.is-a.ceo` counts on
-`_vercel.holder.is-a.ceo` and nowhere else.
+`_vercel.holder.is-a.ceo` and nowhere else. Vercel's docs describe the apex placement
+because that is where it lands when Vercel owns DNS for the apex; the verifier reads
+the per-name label too. The reference registry `is-a-dev/register` carries 3594
+`_vercel.<label>.json` sidecars and no apex `_vercel` TXT at all.
 
 The proof cannot sit in your own file either. `holder.is-a.ceo` already carries a
 CNAME, and DNS forbids a CNAME and a TXT on the same name, so `dnscontrol push` would
@@ -115,6 +118,13 @@ the name in the same PR) and `_vercel.<label>.is-a.ceo.json` (if Vercel already 
 the banner). After the merge and the DNS push, press Verify in Vercel, wait for
 **Valid Configuration**, then run `--remove` in a second PR. The TXT is only needed
 until the domain is attached; deleting it afterwards does not detach anything.
+
+Order matters. The TXT has to answer before you press Verify, and a failed check is
+cached on Vercel's side for a while, so pressing Verify first only buys you a repeat
+of the same banner. Confirm the record answers from an authoritative nameserver
+first (`nslookup -type=TXT _vercel.holder.is-a.ceo becky.ns.cloudflare.com`), and do
+not use a public resolver as the gate: `8.8.8.8` can stay `NXDOMAIN` for a few
+minutes after Cloudflare already answers with a 300s TTL.
 
 A dotted name whose first label starts with `_` is an **auxiliary** entry: it is
 exempt from the one-name-per-person quota and from the base-claim rule, and its owner
