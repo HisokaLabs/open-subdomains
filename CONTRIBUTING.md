@@ -65,7 +65,13 @@ name, never someone else's. The same rule covers underscore records such as
 certificate for `go` or forge its mail policy. Service records are the
 exception: a bare `_minecraft._tcp.mc` with only SRV data is open to anyone.
 A bare zone-wide `*` is maintainer-only, since it would otherwise cover every
-unclaimed name in the zone. The filename contains
+unclaimed name in the zone. The same holds for `@` and for any bare underscore
+name at the zone root: `_acme-challenge.is-a.ceo` can answer a DNS-01 challenge
+for `*.is-a.ceo`, `_dmarc.is-a.ceo` forges mail policy for the whole zone, and
+`_vercel.is-a.ceo` is the ownership proof Vercel asks for when the zone is
+already linked to another account. Put your own record one label deeper, e.g.
+`_acme-challenge.app` or `_vercel.yourname`, where the base-claim rule above
+applies. The filename contains
 `*`, which Windows cannot create on an NTFS disk. That matches the reference
 registry, where everything runs on Linux and CI. If you develop on Windows,
 add wildcard entries through the GitHub web interface instead of a local

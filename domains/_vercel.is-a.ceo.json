@@ -1,0 +1,10 @@
+{
+  "$schema": "./SCHEMA.json",
+  "domain": "is-a.ceo",
+  "subdomain": "_vercel",
+  "owner": "HisokaLabs",
+  "description": "Vercel ownership proofs for the zone. Vercel asks for this root record when is-a.ceo is already linked to another account, so maintainers append a line here instead of granting the name.",
+  "records": {
+    "TXT": ["vc-domain-verify=nay.is-a.ceo,f75bae0a0d0c2f230264"]
+  }
+}

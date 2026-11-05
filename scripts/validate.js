@@ -421,21 +421,16 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
   }
   if (owner.length > 39) fail(`${where}: owner "${owner}" is longer than 39 characters`);
 
-  // A bare wildcard covers every unclaimed name in the whole zone, so only
-  // maintainers may hold one.
-  if (sub === "*" && !meta.maintainers.includes(owner.toLowerCase().trim())) {
-    fail(`${where}: a zone-wide wildcard "*" is maintainer-only`);
+  const zoneWide = sub === "@" || sub === "*" || (sub.startsWith("_") && !sub.includes("."));
+  if (zoneWide && !meta.maintainers.includes(owner.toLowerCase().trim())) {
+    fail(
+      `${where}: "${sub}" is a zone-wide name, so maintainers hold it; it covers every name in ${zone}, ` +
+        `not just one. Put your own record one label deeper`,
+    );
   }
 
-  // One subdomain per owner per zone: the registry is not a hoarding service.
-  // The "@" entry is the zone itself, not a claim, so it does not count
-  // against its owner's quota; a maintainer-held bare "*" is infrastructure
-  // and is likewise exempt. A wildcard "*.base" is checked against the base
-  // claim below instead of counting as a second subdomain, and an
-  // underscore-prefixed record (_acme-challenge.base, _dmarc.base) is an
-  // auxiliary record for a name the owner already had to claim.
   const auxiliary = sub.includes(".") && sub.split(".")[0].startsWith("_");
-  if (sub !== "@" && sub !== "*" && !sub.startsWith("*.") && !auxiliary) {
+  if (!zoneWide && !sub.startsWith("*.") && !auxiliary) {
     const ownerKey = `${zone}/${owner.toLowerCase()}`;
     if (claims.has(ownerKey)) {
       fail(`${where}: owner "${owner}" already has ${claims.get(ownerKey)} in ${zone}, one subdomain per person`);

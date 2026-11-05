@@ -217,7 +217,7 @@ const skipOnWindows = process.platform === "win32"
   : false;
 
 test("a bare wildcard is maintainer-only", { skip: skipOnWindows }, () => {
-  rejects({ "*.is-a.ceo.json": labelled("*", { owner: "random-person" }) }, /wildcard "\*" is maintainer-only/);
+  rejects({ "*.is-a.ceo.json": labelled("*", { owner: "random-person" }) }, /is a zone-wide name, so maintainers hold it/);
   assert.equal(accepts({ "*.is-a.ceo.json": labelled("*", { owner: "daningl" }) }).code, 0);
 });
 
@@ -240,6 +240,42 @@ test("an underscore record needs its base claimed by the same owner", () => {
     "_acme-challenge.base.is-a.ceo.json": labelled("_acme-challenge.base", {
       owner: "someone",
       records: { TXT: ["token"] },
+    }),
+  };
+  assert.equal(accepts(owned).code, 0);
+});
+
+test("a zone-root underscore name is maintainer-only", () => {
+  rejects(
+    { "_acme-challenge.is-a.ceo.json": labelled("_acme-challenge", { records: { TXT: ["token"] } }) },
+    /is a zone-wide name, so maintainers hold it/,
+  );
+  rejects(
+    { "_vercel.is-a.ceo.json": labelled("_vercel", { records: { TXT: ["vc-domain-verify=is-a.ceo,x"] } }) },
+    /is a zone-wide name, so maintainers hold it/,
+  );
+  const held = labelled("_dmarc", { owner: "daningl", records: { TXT: ["v=DMARC1; p=none"] } });
+  assert.equal(accepts({ "_dmarc.is-a.ceo.json": held }).code, 0);
+});
+
+test("a zone-wide record does not consume its holder's quota", () => {
+  const files = {
+    "@.is-a.ceo.json": APEX,
+    "www.is-a.ceo.json": labelled("www", { owner: "HisokaLabs", records: { CNAME: ["hisokalabs.github.io"] } }),
+    "_vercel.is-a.ceo.json": labelled("_vercel", {
+      owner: "HisokaLabs",
+      records: { TXT: ["vc-domain-verify=nay.is-a.ceo,x"] },
+    }),
+  };
+  assert.equal(accepts(files).code, 0);
+});
+
+test("a dotted underscore record is not zone-wide", () => {
+  const owned = {
+    "nay.is-a.ceo.json": labelled("nay", { owner: "someone" }),
+    "_vercel.nay.is-a.ceo.json": labelled("_vercel.nay", {
+      owner: "someone",
+      records: { TXT: ["vc-domain-verify=nay.is-a.ceo,x"] },
     }),
   };
   assert.equal(accepts(owned).code, 0);

@@ -21,6 +21,7 @@ const FIELD_HINTS = [
   { test: /invalid JSON/, key: "json" },
   { test: /already has .* one subdomain per person/, key: "quota" },
   { test: /is reserved by the registry|is blocked by the registry/, key: "reserved" },
+  { test: /is a zone-wide name, so maintainers hold it/, key: "zone-wide" },
   { test: /keeps those names unclaimed/, key: "reserved-word" },
   { test: /not a public IPv4|not a public IPv6/, key: "private-ip" },
   { test: /is not a valid public CNAME target|not a public hostname/, key: "target" },
@@ -75,6 +76,11 @@ const NOTES = {
     "One subdomain per person per zone. Close this PR if you already hold one, or pick a different zone.",
   reserved:
     "Reserved and blocked labels are never granted. Anything that looks like impersonation or phishing is blocked outright.",
+  "zone-wide":
+    "`@`, a bare `*`, and a bare underscore name (`_acme-challenge`, `_vercel`, `_dmarc`) change the whole zone: " +
+    "a root `_acme-challenge` can answer a DNS-01 challenge for `*.is-a.ceo`, and a root `_vercel` is the ownership " +
+    "proof Vercel asks for. Only maintainers hold those. Your own verification record belongs one label deeper, " +
+    "e.g. `_vercel.yourname`.",
   "reserved-word":
     "Some names are refused by the kind of word they are rather than by a list. Pronouns (`me`, `we`, `they`, `you`), articles (`the`, `this`), and grammar words describe the reader, not you, so they are never granted. Pick the GitHub handle the record points at.",
   "private-ip":
