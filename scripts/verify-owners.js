@@ -9,14 +9,42 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const DOMAINS_DIR = path.join(ROOT, "domains");
 const META_PATH = path.join(DOMAINS_DIR, "_meta.json");
-const RESERVED_FILENAMES = new Set(["_meta.json", "_example.json", "SCHEMA.json"]);
+const RESERVED_FILENAMES = new Set(["_meta.json", "_example.json", "schema.json"]);
+
+function isReservedFile(filename) {
+  return RESERVED_FILENAMES.has(path.basename(filename).toLowerCase());
+}
+
+function normalizeUsername(value) {
+  if (typeof value === "string") {
+    return value.trim().replace(/^@/, "").toLowerCase();
+  }
+  if (value && typeof value === "object") {
+    const name = value.username || value.name || value.login;
+    if (typeof name === "string") {
+      return name.trim().replace(/^@/, "").toLowerCase();
+    }
+  }
+  return "";
+}
+
+function getRawOwner(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  if (typeof entry.owner === "string") return entry.owner;
+  if (entry.owner && typeof entry.owner === "object") {
+    return entry.owner.username || entry.owner.name || entry.owner.login || "";
+  }
+  return "";
+}
 
 function loadMaintainers() {
   if (!fs.existsSync(META_PATH)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(META_PATH, "utf8"));
     const meta = parsed._meta || parsed;
-    return Array.isArray(meta.maintainers) ? meta.maintainers.map((s) => String(s).toLowerCase()) : [];
+    return Array.isArray(meta.maintainers)
+      ? meta.maintainers.map((s) => normalizeUsername(s)).filter(Boolean)
+      : [];
   } catch {
     return [];
   }
@@ -40,13 +68,13 @@ function changedFiles() {
       const parsed = JSON.parse(process.env.CHANGED_FILES);
       if (Array.isArray(parsed)) {
         return parsed.filter(
-          (f) => typeof f === "string" && f.endsWith(".json") && !RESERVED_FILENAMES.has(path.basename(f))
+          (f) => typeof f === "string" && f.toLowerCase().endsWith(".json") && !isReservedFile(f)
         );
       }
     } catch {
       return process.env.CHANGED_FILES.split("\n")
         .map((l) => l.trim())
-        .filter((l) => l.endsWith(".json") && !RESERVED_FILENAMES.has(path.basename(l)));
+        .filter((l) => l.toLowerCase().endsWith(".json") && !isReservedFile(l));
     }
   }
 
@@ -64,7 +92,7 @@ function changedFiles() {
       const lines = output
         .split("\n")
         .map((l) => (l.length >= 3 && /^[ MADRCU?!]{1,2}\s/.test(l) ? l.slice(3) : l).trim())
-        .filter((l) => l.endsWith(".json") && !RESERVED_FILENAMES.has(path.basename(l)));
+        .filter((l) => l.toLowerCase().endsWith(".json") && !isReservedFile(l));
       if (lines.length > 0) return lines;
     }
   }
@@ -72,7 +100,7 @@ function changedFiles() {
   if (fs.existsSync(DOMAINS_DIR)) {
     return fs
       .readdirSync(DOMAINS_DIR)
-      .filter((f) => f.endsWith(".json") && !RESERVED_FILENAMES.has(f))
+      .filter((f) => f.toLowerCase().endsWith(".json") && !isReservedFile(f))
       .map((f) => path.join("domains", f));
   }
 
@@ -86,7 +114,7 @@ function main() {
     process.exit(0);
   }
 
-  const author = prAuthor.trim().toLowerCase();
+  const author = normalizeUsername(prAuthor);
   const maintainers = loadMaintainers();
   if (maintainers.includes(author)) {
     console.log(`verify-owners: PR author "${prAuthor}" is a registry maintainer, skipping owner check`);
@@ -115,12 +143,13 @@ function main() {
     const entries = Array.isArray(parsed) ? parsed : [parsed];
     for (const entry of entries) {
       if (!entry || typeof entry !== "object") continue;
-      if (typeof entry.owner !== "string" || entry.owner.trim().length === 0) {
+      const rawOwner = getRawOwner(entry);
+      if (!rawOwner || rawOwner.trim().length === 0) {
         continue;
       }
-      const owner = entry.owner.trim().toLowerCase();
+      const owner = normalizeUsername(rawOwner);
       if (owner !== author) {
-        mismatches.push(`${file}: owner "${entry.owner}" does not match the PR author "${prAuthor}"`);
+        mismatches.push(`${file}: owner "${rawOwner}" does not match the PR author "${prAuthor}"`);
       }
     }
   }

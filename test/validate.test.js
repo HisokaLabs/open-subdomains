@@ -270,8 +270,20 @@ test("verify-owners rejects a claim by someone other than the PR author", () => 
 });
 
 test("verify-owners accepts a claim by the PR author, case-insensitively", () => {
-  const dir = makeRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "TheAuthor" }) });
-  assert.equal(run(dir, "verify-owners.js", { PR_AUTHOR: "theauthor" }).code, 0);
+  const dir1 = makeRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "TheAuthor" }) });
+  assert.equal(run(dir1, "verify-owners.js", { PR_AUTHOR: "theauthor" }).code, 0);
+
+  const dir2 = makeRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "theauthor" }) });
+  assert.equal(run(dir2, "verify-owners.js", { PR_AUTHOR: "THEAUTHOR" }).code, 0);
+
+  const dir3 = makeRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "tHeAuThOr" }) });
+  assert.equal(run(dir3, "verify-owners.js", { PR_AUTHOR: "ThEaUtHoR" }).code, 0);
+
+  const dir4 = makeRegistry({ "web.is-a.ceo.json": labelled("web", { owner: "@TheAuthor" }) });
+  assert.equal(run(dir4, "verify-owners.js", { PR_AUTHOR: "theauthor" }).code, 0);
+
+  const dir5 = makeRegistry({ "web.is-a.ceo.json": labelled("web", { owner: { username: "TheAuthor" } }) });
+  assert.equal(run(dir5, "verify-owners.js", { PR_AUTHOR: "theauthor" }).code, 0);
 });
 
 test("verify-owners allows maintainers to edit any entry", () => {
