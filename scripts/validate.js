@@ -12,6 +12,8 @@ const META_PATH = path.join(DOMAINS_DIR, "_meta.json");
 
 const RESERVED_FILENAMES = new Set(["_meta.json", "_example.json", "SCHEMA.json"]);
 
+const { classifyLabel } = require("./name-classes.js");
+
 class ValidationError extends Error {
   constructor(message) {
     super(message);
@@ -84,8 +86,21 @@ function preflightEntry(file, entry, meta) {
   return problems;
 }
 
-function advisoryCheck(file, entry) {
+function advisoryCheck(file, entry, meta) {
   const warnings = [];
+  if (isPlainObject(entry) && meta && Array.isArray(meta.advisoryClasses) && meta.advisoryClasses.length > 0) {
+    const sub = typeof entry.subdomain === "string" ? entry.subdomain.trim() : "";
+    const genericClass = sub && !sub.includes(".") && sub !== "@" && sub !== "*" ? classifyLabel(sub, meta.advisoryClasses) : null;
+    if (genericClass) {
+      warnings.push({
+        file,
+        message:
+          `${file}: "${sub}" is ${genericClass.label} (${genericClass.why}). ` +
+          `This passes the schema, but a maintainer is likely to ask for a personal handle ` +
+          `before merging, because a shared word is claimed once and then unavailable to everyone else.`,
+      });
+    }
+  }
   if (!isPlainObject(entry) || !isPlainObject(entry.records)) return warnings;
   const records = entry.records;
   const hasCname = records.CNAME !== undefined;
@@ -315,12 +330,15 @@ function loadMeta() {
   if (!fs.existsSync(META_PATH)) fail("domains/_meta.json not found");
   const parsed = JSON.parse(fs.readFileSync(META_PATH, "utf8"));
   const meta = parsed._meta || parsed;
+  const policy = meta.namePolicy || {};
   return {
     zones: (meta.zones || []).map((s) => String(s).toLowerCase()),
     maintainers: (meta.maintainers || []).map((s) => String(s).toLowerCase()),
     reserved: (meta.reserved || []).map((s) => String(s).toLowerCase()),
     blocked: (meta.blocked || []).map((s) => String(s).toLowerCase()),
     maxLength: typeof meta.maxLength === "number" ? meta.maxLength : 63,
+    reservedClasses: (policy.reservedClasses || []).map((s) => String(s).toLowerCase()),
+    advisoryClasses: (policy.advisoryClasses || []).map((s) => String(s).toLowerCase()),
   };
 }
 
@@ -387,6 +405,13 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
   if (!sub.includes(".") && sub !== "@" && sub !== "*") {
     if (meta.reserved.includes(sub)) fail(`${where}: "${sub}" is reserved by the registry`);
     if (meta.blocked.includes(sub)) fail(`${where}: "${sub}" is blocked by the registry`);
+    const reservedClass = classifyLabel(sub, meta.reservedClasses);
+    if (reservedClass) {
+      fail(
+        `${where}: "${sub}" is ${reservedClass.label}, and this registry keeps those names unclaimed ` +
+          `(${reservedClass.why}); pick a personal handle instead`,
+      );
+    }
   }
 
   if (typeof entry.owner === "string") entry.owner = entry.owner.trim();
@@ -743,7 +768,7 @@ function main() {
       problems.push(...preflight);
       continue;
     }
-    warnings.push(...advisoryCheck(file, parsed));
+    warnings.push(...advisoryCheck(file, parsed, meta));
     try {
       validateEntry(file, parsed, meta, seen, claims, subOwners);
     } catch (err) {

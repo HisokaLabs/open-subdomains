@@ -60,6 +60,16 @@
       "icloud",
       "outlook",
       "gmail"
-    ]
+    ],
+    "namePolicy": {
+      "reservedClasses": [
+        "pronoun",
+        "determiner",
+        "function-word"
+      ],
+      "advisoryClasses": [
+        "generic-noun"
+      ]
+    }
   }
 }

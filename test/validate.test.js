@@ -18,6 +18,10 @@ const META = {
     maintainers: ["hisokalabs", "dikaardnt", "daningl"],
     reserved: ["api", "admin", "mail", "status", "dev", "is-a"],
     blocked: ["abuse", "security", "paypal", "github", "gmail"],
+    namePolicy: {
+      reservedClasses: ["pronoun"],
+      advisoryClasses: ["generic-noun"],
+    },
   },
 };
 
@@ -451,4 +455,65 @@ test("the report escalates a CNAME plus TXT entry", () => {
 test("the report never leaves an unresolved link", () => {
   const markdown = runReport({ "mc.is-a.ceo.json": labelled("mc") }, {});
   assert.doesNotMatch(markdown, /\]\(\.\//);
+});
+
+for (const name of ["me", "we", "they", "you", "us", "him", "her", "them", "anyone", "someone"]) {
+  test(`a pronoun claim "${name}" is rejected without being listed by hand`, () => {
+    rejects({ [`${name}.is-a.ceo.json`]: labelled(name) }, /is a pronoun, and this registry keeps those names unclaimed/);
+  });
+}
+
+test("a pronoun is caught through leetspeak and repeated letters", () => {
+  for (const variant of ["m3", "y0u", "th3y", "meee"]) {
+    rejects({ [`${variant}.is-a.ceo.json`]: labelled(variant) }, /keeps those names unclaimed/);
+  }
+});
+
+test("the classifier normalizes case, leetspeak and padding on its own", () => {
+  const { classifyLabel } = require(path.join(SCRIPTS, "name-classes.js"));
+  for (const variant of ["ME", "M3", "m3", "y0u", "th3y", "meee", "M.E", "we-"]) {
+    assert.equal(classifyLabel(variant, ["pronoun"])?.name, "pronoun", variant);
+  }
+  assert.equal(classifyLabel("soudayonee", ["pronoun"]), null);
+});
+
+test("a determiner or grammar word is caught by class", () => {
+  const dir = makeRegistry({ "the.is-a.ceo.json": labelled("the") });
+  const metaPath = path.join(dir, "domains", "_meta.json");
+  const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  meta._meta.namePolicy.reservedClasses = ["pronoun", "determiner", "function-word"];
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  const { code, out } = run(dir, "validate.js");
+  assert.equal(code, 1);
+  assert.match(out, /is a determiner/);
+});
+
+test("a generic word passes but carries an advisory warning", () => {
+  const { code, payload } = runJson(makeRegistry({ "blog.is-a.ceo.json": labelled("blog") }), "validate.js");
+  assert.equal(code, 0);
+  assert.equal(payload.ok, true);
+  assert.match(payload.warnings.map((w) => w.message).join("\n"), /is a generic word/);
+});
+
+test("an ordinary personal handle is left alone", () => {
+  const { code, payload } = runJson(makeRegistry({ "soudayonee.is-a.ceo.json": labelled("soudayonee") }), "validate.js");
+  assert.equal(code, 0);
+  assert.equal(payload.problems.length, 0);
+  assert.equal(payload.warnings.length, 0);
+});
+
+test("an empty name policy disables the class check", () => {
+  const dir = makeRegistry({ "me.is-a.ceo.json": labelled("me") });
+  const metaPath = path.join(dir, "domains", "_meta.json");
+  const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  meta._meta.namePolicy = { reservedClasses: [], advisoryClasses: [] };
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  const { code } = run(dir, "validate.js");
+  assert.equal(code, 0);
+});
+
+test("the real _meta.json reserves the pronoun paradigm", () => {
+  const meta = JSON.parse(fs.readFileSync(path.join(REPO, "domains", "_meta.json"), "utf8"))._meta;
+  assert.deepEqual(meta.namePolicy.reservedClasses, ["pronoun", "determiner", "function-word"]);
+  assert.deepEqual(meta.namePolicy.advisoryClasses, ["generic-noun"]);
 });
