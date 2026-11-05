@@ -1,23 +1,15 @@
 name: check
 
-# Validates every domains/*.json entry against the registry rules. No
-# credentials needed — this is the fast gate that fails a bad PR early.
-
 on:
   pull_request:
-    paths:
-      - 'domains/**'
-      - 'dnsconfig.js'
-      - 'scripts/**'
-      - 'package.json'
   push:
     branches:
       - main
-    paths:
-      - 'domains/**'
-      - 'dnsconfig.js'
-      - 'scripts/**'
-      - 'package.json'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -25,29 +17,59 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
-      # Full history so verify-owners can diff the PR against its base branch.
-      # A shallow clone would silently fall back to checking every file.
-      - uses: actions/checkout@v4
+      - id: filter
+        name: Decide what to validate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$EVENT" != 'pull_request' ]; then
+            echo "registry=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          touched=false
+          if files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
+            if echo "$files" | grep -qE '^(domains/|scripts/|test/|dnsconfig\.js|package\.json|.*\.json$)'; then
+              touched=true
+            fi
+          else
+            touched=true
+          fi
+          echo "registry=$touched" >> "$GITHUB_OUTPUT"
+          if [ "$touched" = 'false' ]; then
+            echo 'No registry-relevant files changed, so nothing to validate.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - if: steps.filter.outputs.registry == 'true'
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - if: steps.filter.outputs.registry == 'true'
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
-      - name: Validate domains/*.json
+      - if: steps.filter.outputs.registry == 'true'
+        name: Validate domains/*.json
         run: npm run check
 
-      # Every entry must be owned by the person opening the PR. Skipped on push
-      # and locally, where PR_AUTHOR is unset.
-      - name: Verify entry owners match the PR author
-        if: github.event_name == 'pull_request'
+      - if: steps.filter.outputs.registry == 'true'
+        name: Run the validator test suite
+        run: npm test
+
+      - if: steps.filter.outputs.registry == 'true' && github.event_name == 'pull_request'
+        name: Verify entry owners match the PR author
         env:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: npm run verify-owners
 
-      - name: DNSControl check
+      - if: steps.filter.outputs.registry == 'true'
+        name: DNSControl check
         uses: HisokaLabs/dnscontrol-actions@v4
         with:
           args: check

@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "about": "Multi-zone subdomain registry. Add a JSON file in domains/ and open a PR; CI validates the change. dnsconfig.js reads these files at runtime, nothing is generated. Only zones listed here are accepted in \"domain\" — a zone must already exist in the Cloudflare account.",
+    "about": "Multi-zone subdomain registry. Add a JSON file in domains/ and open a PR; CI validates the change. dnsconfig.js reads these files at runtime, nothing is generated. Only zones listed here are accepted in \"domain\": a zone must already exist in the Cloudflare account.",
     "provider": "cloudflare",
     "maxLength": 63,
     "zones": [
@@ -9,7 +9,7 @@
     "maintainers": [
       "hisokalabs",
       "dikaardnt",
-      "rmdni-id"
+      "daningl"
     ],
     "reserved": [
       "api",

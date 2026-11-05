@@ -1,7 +1,7 @@
 name: push
 
-# Applies every managed zone to Cloudflare. Only ever runs on main, only ever
-# after the check and preview jobs have passed on the merge commit.
+# Applies every managed zone to Cloudflare. Only ever runs on main, and only
+# after the check job has passed on the merge commit.
 #
 # Required secret: CLOUDFLARE_API_TOKEN with Zone.DNS edit permission on all
 # zones listed in domains/_meta.json.
@@ -14,7 +14,7 @@ on:
       - 'domains/**'
       - 'dnsconfig.js'
 
-# Never apply two dnscontrol pushes at once — overlapping runs would race on
+# Never apply two dnscontrol pushes at once. Overlapping runs would race on
 # the Cloudflare API and leave the zones in an undefined state.
 concurrency:
   group: dns-push
@@ -27,11 +27,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       # dnsconfig.js reads domains/*.json at runtime, so a push always applies
       # exactly what is committed; this re-runs the validator as a backstop.
@@ -44,3 +44,19 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         with:
           args: push
+
+      - name: Rebuild the site
+        if: success()
+        env:
+          SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$SITE_DISPATCH_TOKEN" ]; then
+            echo "SITE_DISPATCH_TOKEN is not set, skipping the site rebuild"
+            exit 0
+          fi
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer $SITE_DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/HisokaLabs/is-a.ceo/dispatches" \
+            -d '{"event_type":"registry-updated"}'
+          echo "site rebuild dispatched"

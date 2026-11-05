@@ -25,7 +25,8 @@ function getDomainsList(filesPath) {
 			return;
 		}
 		try {
-			var data = require(file);
+			var normalizedFile = file.indexOf('.') === 0 || file.indexOf('/') === 0 || file.indexOf('\\') === 0 || file.indexOf(':') === 1 ? file : './' + file;
+			var data = require(normalizedFile);
 			if (!data.domain || !data.subdomain) {
 				console.error('dnsconfig: skipping ' + file + ', missing "domain" or "subdomain"');
 				return;
@@ -76,7 +77,8 @@ domains.forEach(function (entry) {
 	(records.AAAA || []).forEach(function (ip6) {
 		addRecord(zone, AAAA(name, ip6, proxyState));
 	});
-	(records.CNAME || []).forEach(function (target) {
+	var cnames = typeof records.CNAME === 'string' ? [records.CNAME] : (records.CNAME || []);
+	cnames.forEach(function (target) {
 		var fqdn = target.slice(-1) === '.' ? target : target + '.';
 		addRecord(zone, CNAME(name, fqdn, proxyState));
 	});

@@ -1,0 +1,89 @@
+name: registry-comment
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - 'domains/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: registry-comment-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Explain what the registry check needs
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Take the pull request's entries, keep the registry's own rules
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags --depth=1 origin "pull/${PR_NUMBER}/head:prhead"
+          git checkout prhead -- domains/ 2>/dev/null || echo 'this PR changes nothing under domains/'
+          git checkout HEAD -- domains/_meta.json domains/SCHEMA.json
+          git status --porcelain -- domains/ | head -50
+
+      - name: Decide what to report
+        id: build
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename' > /tmp/changed.txt || true
+          CHANGED_FILES="$(cat /tmp/changed.txt)" \
+            node scripts/pr-report.js > /tmp/comment.md && verdict=pass || verdict=fail
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          cat /tmp/comment.md
+
+      - name: Upsert the report comment
+        uses: actions/github-script@v9
+        env:
+          VERDICT: ${{ steps.build.outputs.verdict }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const marker = '<!-- registry-validator -->';
+            const body = fs.readFileSync('/tmp/comment.md', 'utf8');
+            if (!body.includes(marker)) {
+              core.setFailed('report is missing its marker, refusing to comment');
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.includes(marker));
+
+            if (existing) {
+              if (existing.body === body) {
+                core.info('comment already up to date');
+                return;
+              }
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              core.info(`updated comment ${existing.id}`);
+              return;
+            }
+
+            if (process.env.VERDICT === 'pass') {
+              core.info('nothing to report and no comment to update');
+              return;
+            }
+
+            const created = await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            core.info(`created comment ${created.data.id}`);

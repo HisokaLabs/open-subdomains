@@ -1,7 +1,7 @@
 name: label
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, synchronize]
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
     name: Label by changed files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@v9
         with:
           script: |
             const files = await github.paginate(github.rest.pulls.listFiles, {
@@ -35,7 +35,7 @@ jobs:
               }
             };
 
-            add('domain', (f) => f.startsWith('domains/'));
+            add('subdomain', (f) => f.startsWith('domains/'));
             add('scripts', (f) => f.startsWith('scripts/') || f === 'package.json');
             add('ci', (f) => f.startsWith('.github/'));
             add('docs', (f) => f.endsWith('.md'));
@@ -44,15 +44,16 @@ jobs:
               return;
             }
 
-            // Create each label the first time it is needed.
+            const existing = new Set(
+              (await github.paginate(github.rest.issues.listLabelsForRepo, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+              })).map((l) => l.name)
+            );
+
             for (const name of wanted) {
-              try {
-                await github.rest.issues.getLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name,
-                });
-              } catch {
+              if (!existing.has(name)) {
                 await github.rest.issues.createLabel({
                   owner: context.repo.owner,
                   repo: context.repo.repo,

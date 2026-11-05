@@ -7,6 +7,14 @@
   "required": ["domain", "subdomain", "owner"],
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor hint pointing at this file, usually ./SCHEMA.json."
+    },
+    "_about": {
+      "type": "string",
+      "description": "Free-form note. Only used by _example.json."
+    },
     "domain": {
       "type": "string",
       "description": "The zone this subdomain belongs to, e.g. is-a.ceo. The zone must already exist in the Cloudflare account the API token can edit."
@@ -15,7 +23,7 @@
       "type": "string",
       "pattern": "^(@|\\*|[a-z0-9_])([a-z0-9_.-]*)$",
       "maxLength": 253,
-      "description": "The zone apex (@), a wildcard (*.app — only over a base name you already claim; a bare zone-wide * is maintainer-only), or dot-separated DNS labels. Labels are lowercase; each may start with an underscore (e.g. _acme-challenge) and is at most 63 characters."
+      "description": "The zone apex (@), a wildcard (*.app, only over a base name you already claim; a bare zone-wide * is maintainer-only), or dot-separated DNS labels. Labels are lowercase; each may start with an underscore (e.g. _acme-challenge) and is at most 63 characters."
     },
     "owner": {
       "type": "string",
@@ -60,9 +68,15 @@
           "minItems": 1
         },
         "CNAME": {
-          "type": "array",
-          "items": { "type": "string" },
-          "minItems": 1
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "maxItems": 1
+            }
+          ]
         },
         "TXT": {
           "type": "array",

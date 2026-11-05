@@ -1,13 +1,16 @@
 # Everyone can propose a subdomain; only maintainers merge one.
-* @dikaardnt
-* @rmdni-id
+* @dikaardnt @daningl
 
-# The zone itself — keep this tight.
+# The zone itself. Keep this tight.
 /dnsconfig.js          @dikaardnt
 /domains/_meta.json    @dikaardnt
 /domains/SCHEMA.json   @dikaardnt
 /scripts/              @dikaardnt
-/.github/              @dikaardnt
+# Dependencies are bumped by Dependabot. Requiring a second human approval on a
+# patch bump blocks the merge queue without adding a reviewer. Keep the rest of
+# .github/ tight.
+/.github/workflows/      @daningl
+/.github/                @dikaardnt
 
 # Every claimed subdomain needs a maintainer's eyes before it goes live.
-/domains/*.json        @dikaardnt @rmdni-id
+/domains/*.json        @dikaardnt @daningl

@@ -1,0 +1,10 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "haki",
+  "owner": "shellhaki",
+  "proxied": false,
+  "description": "Haki's personal portfolio",
+  "records": {
+    "CNAME": "3d8e890ae6ab2d84.vercel-dns-017.com."
+  }
+}

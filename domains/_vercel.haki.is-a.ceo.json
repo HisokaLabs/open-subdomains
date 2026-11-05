@@ -1,0 +1,11 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "_vercel.haki",
+  "owner": "shellhaki",
+  "description": "Haki's personal portfolio",
+  "records": {
+    "TXT": [
+      "vc-domain-verify=haki.is-a.ceo,89c449124e6d3a2e2279"
+    ]
+  }
+}

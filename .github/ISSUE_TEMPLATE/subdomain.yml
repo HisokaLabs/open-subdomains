@@ -3,16 +3,16 @@ description: Claim a subdomain under is-a.ceo
 title: "Add <subdomain>.is-a.ceo"
 labels: ["subdomain"]
 body:
-      - type: markdown
-        attributes:
-          value: |
-            Thanks for claiming a subdomain! Fill in the details below and a
-            maintainer will review the PR. The DNS change is previewed automatically.
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for claiming a subdomain. Fill in the details below and a
+        maintainer will review the pull request. CI validates the DNS change.
 
-            Make sure the filename in `domains/` matches the subdomain exactly.
-            Check the name is free first at [is-a.ceo/check](https://is-a.ceo/check),
-            and see [domains/SCHEMA.json](https://github.com/HisokaLabs/open-subdomains/blob/main/domains/SCHEMA.json)
-            for the full field list.
+        Make sure the filename in `domains/` matches the subdomain exactly.
+        Check the name is free first at [is-a.ceo/check](https://is-a.ceo/check),
+        and see [domains/SCHEMA.json](https://github.com/HisokaLabs/open-subdomains/blob/main/domains/SCHEMA.json)
+        for the full field list.
   - type: input
     id: subdomain
     attributes:
