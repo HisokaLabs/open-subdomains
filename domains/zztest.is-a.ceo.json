@@ -2,9 +2,8 @@
   "domain": "is-a.ceo",
   "subdomain": "zztest",
   "owner": "daningl",
-  "repo": "github.com/daningl/zztest",
-  "description": "Test entry for the registry-comment workflow.",
   "records": {
-    "CNAME": "zztest.pages.dev"
+    "CNAME": ["zztest.vercel.app"],
+    "TXT": ["vc-domain-verify=zztest.is-a.ceo,abc123"]
   }
 }
