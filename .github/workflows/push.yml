@@ -27,9 +27,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '24'
 
@@ -39,7 +39,7 @@ jobs:
         run: npm run check
 
       - name: DNSControl push
-        uses: HisokaLabs/dnscontrol-actions@v4
+        uses: HisokaLabs/dnscontrol-actions@efc133a75954bd7bc4dc6b077a107b7244fccb02 # v4
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         with:
