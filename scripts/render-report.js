@@ -19,7 +19,7 @@ const FIELD_HINTS = [
   { test: /missing "owner"/, key: "owner" },
   { test: /"records" must be an object/, key: "records" },
   { test: /unknown key/, key: "keys" },
-  { test: /file must be named/, key: "filename" },
+  { test: /file must be named|must be <subdomain>\.<zone>\.json|must be named/, key: "filename" },
   { test: /cannot coexist with/, key: "cname" },
   { test: /without a \.json extension/, key: "extension" },
   { test: /invalid JSON/, key: "json" },
@@ -30,21 +30,33 @@ const FIELD_HINTS = [
   { test: /not a public IPv4|not a public IPv6/, key: "private-ip" },
   { test: /is not a valid public CNAME target|not a public hostname/, key: "target" },
   { test: /needs .* claimed by the same owner/, key: "base" },
+  { test: /only a maintainer can change this file|only a maintainer can change the validator/, key: "scope" },
+  { test: /a claim PR adds one|only add a file under domains\//, key: "one-file" },
+  { test: /use two spaces for indentation|end the file with a newline/, key: "style" },
+  { test: /contains a subdirectory/, key: "flat" },
+  { test: /base branch .* could not be read/, key: "base-ref" },
 ];
 
 function subdomainFromFile(file) {
   if (typeof file !== "string") return "";
   const base = path.basename(file).replace(/\.json$/i, "");
-  const dot = base.indexOf(".is-a.ceo");
+  const dot = base.indexOf(".");
   return dot > 0 ? base.slice(0, dot) : base;
 }
 
-function exampleFor(subdomain) {
+function escapeForComment(text) {
+  return String(text)
+    .replace(/<!--/g, "&lt;!--")
+    .replace(/@(?=[A-Za-z0-9_-])/g, "&#64;");
+}
+
+function exampleFor(subdomain, zone) {
   const label = subdomain || "mc";
+  const zoneName = zone || "is-a.ceo";
   return [
     "{",
     '  "$schema": "./SCHEMA.json",',
-    '  "domain": "is-a.ceo",',
+    `  "domain": "${zoneName}",`,
     `  "subdomain": "${label}",`,
     '  "owner": "your-github-username",',
     '  "repo": "github.com/your-github-username/your-repo",',
@@ -105,6 +117,21 @@ const NOTES = {
     "Two names pointing at one host means one page answers under two subdomains. Point the record at your own deployment target, not at another entry's.",
   owner:
     "`owner` is the GitHub username of the person opening the PR, as a plain string.",
+  scope:
+    "A claim PR touches its own `domains/<name>.<zone>.json` and nothing else. `dnsconfig.js`, " +
+    "`scripts/`, `test/`, `.github/`, `domains/_meta.json` and `domains/SCHEMA.json` belong to the " +
+    "maintainers; a change there needs its own pull request.",
+  "one-file":
+    "One claim, one file. If you need several names, open one pull request per name so each can be " +
+    "reviewed and reverted on its own.",
+  style:
+    "Registry files are two-space indented and end with a newline, so `git diff` stays readable.",
+  flat:
+    "Every entry lives directly in `domains/`, because the file name is the record. A file in a " +
+    "subdirectory would reach the zone without passing the validator.",
+  "base-ref":
+    "The check compares your branch against `main` to know what changed. This is a CI problem rather " +
+    "than a problem with your entry; re-running the workflow usually clears it.",
 };
 
 function renderSection(entry) {
@@ -116,7 +143,7 @@ function renderSection(entry) {
       entry.file && problem.message.startsWith(`${entry.file}: `)
         ? problem.message.slice(entry.file.length + 2)
         : problem.message;
-    lines.push(`- ${text}`);
+    lines.push(`- ${escapeForComment(text)}`);
   }
   if (entry.problems.length > MAX_PROBLEMS_PER_FILE) {
     lines.push(`- ...and ${entry.problems.length - MAX_PROBLEMS_PER_FILE} more`);
@@ -140,6 +167,10 @@ function renderReport({ report, prAuthor, prNumber }) {
   const warnings = Array.isArray(report.warnings) ? report.warnings : [];
   const verified = Array.isArray(report.verified) ? report.verified : [];
   const ok = report.ok === true && problems.length === 0;
+  // The file named by the first problem tells the reader which zone to copy.
+  const zoneHint = String(
+    (problems.find((p) => p.file && p.file !== "repository") || {}).file || "",
+  ).split(".").slice(1, -1).join(".");
 
   const lines = [];
   lines.push(MARKER);
@@ -155,7 +186,7 @@ function renderReport({ report, prAuthor, prNumber }) {
       lines.push("### Fix this before a maintainer merges");
       lines.push("");
       for (const warning of warnings) {
-        lines.push(`- ${warning.message}`);
+        lines.push(`- ${escapeForComment(warning.message)}`);
       }
       lines.push("");
       lines.push(
@@ -203,7 +234,7 @@ function renderReport({ report, prAuthor, prNumber }) {
     lines.push("### Also worth fixing");
     lines.push("");
     for (const warning of warnings) {
-      lines.push(`- ${warning.message}`);
+      lines.push(`- ${escapeForComment(warning.message)}`);
     }
     lines.push("");
   }
@@ -215,7 +246,7 @@ function renderReport({ report, prAuthor, prNumber }) {
   lines.push("### What a valid file looks like");
   lines.push("");
   lines.push("```json");
-  lines.push(exampleFor(label));
+  lines.push(exampleFor(label, zoneHint));
   lines.push("```");
   lines.push("");
   lines.push(
@@ -224,8 +255,12 @@ function renderReport({ report, prAuthor, prNumber }) {
       "Run `npm run check` and `npm test` locally to see the same verdict before pushing."
   );
   if (prAuthor) {
+    // The author is a real GitHub user, so naming them is useful; the mention is
+    // written as &#64; so a bot comment cannot ping anyone by posting.
+    const handle = escapeForComment(String(prAuthor).replace(/^@/, ""));
+    const issue = String(prNumber || "").replace(/[^0-9]/g, "");
     lines.push("");
-    lines.push(`<sub>Checked for @${prAuthor}${prNumber ? ` on #${prNumber}` : ""}.</sub>`);
+    lines.push(`<sub>Checked for ${handle}${issue ? ` on #${issue}` : ""}.</sub>`);
   }
   lines.push("");
   return `${lines.join("\n")}`;
@@ -263,4 +298,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { renderReport, exampleFor, subdomainFromFile, MARKER };
+module.exports = { renderReport, exampleFor, subdomainFromFile, escapeForComment, MARKER };

@@ -6,7 +6,7 @@
 - [ ] I have verified that my site is reachable at the URL I provided.
 - [ ] `owner` is my own GitHub username, and `email` (optional) is an address I actually read.
 - [ ] I claim only one subdomain per person per zone.
-- [ ] `npm run check` and `npm test` pass locally.
+- [ ] `npm run verify` passes locally.
 
 # Website Preview
 

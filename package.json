@@ -5,7 +5,9 @@
   "description": "Multi-zone free-subdomain registry, starting with is-a.ceo. JSON in, DNSControl out: dnsconfig.js loads domains/*.json at runtime and derives the zones from the entries. Deployed by HisokaLabs/dnscontrol-actions@v4.",
   "scripts": {
     "check": "node scripts/validate.js",
+    "check:format": "node scripts/check-format.js",
     "test": "node --test \"test/**/*.test.js\"",
+    "verify": "npm run check && npm run check:format && npm test",
     "verify-owners": "node scripts/verify-owners.js",
     "health": "node scripts/health-check.js",
     "status": "node scripts/status.js",

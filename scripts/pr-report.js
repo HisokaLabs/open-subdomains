@@ -86,6 +86,22 @@ function main() {
     process.exit(1);
   }
 
+  if (changedFiles.length > 0) {
+    const format = runNode("check-format.js", ["--json"], {
+      CHANGED_FILES: JSON.stringify(changedFiles),
+    });
+    let parsedFormat = null;
+    try {
+      parsedFormat = JSON.parse(format.stdout);
+    } catch {
+      parsedFormat = null;
+    }
+    if (parsedFormat && Array.isArray(parsedFormat.problems) && parsedFormat.problems.length > 0) {
+      report.problems.push(...parsedFormat.problems);
+      report.ok = false;
+    }
+  }
+
   if (process.env.PR_AUTHOR && changedFiles.length > 0) {
     const owners = runNode("verify-owners.js", [], {
       PR_AUTHOR: process.env.PR_AUTHOR,
