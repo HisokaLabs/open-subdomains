@@ -4,16 +4,16 @@ DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/Hi
 
 ## Claim a subdomain
 
-DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/HisokaLabs/dnscontrol-actions).
-
 1. Fork this repository and create a branch.
 2. Copy [`domains/_example.json`](domains/_example.json) to
    `domains/<your-subdomain>.is-a.ceo.json` (for example `mc.is-a.ceo.json`).
    The filename must be exactly `<subdomain>.<zone>.json`.
-3. Run `npm run check` and `npm test` locally so you see the same verdict as CI.
+3. Run `npm run check`, `npm test` and `npm run check:format` locally so you see
+   the same verdict as CI.
 4. Open a pull request against `main` and fill in the template. The `check`
    workflow validates the entry, confirms `owner` is your own GitHub username,
-   and previews the DNS diff.
+   and previews the DNS diff. The `format` workflow confirms the change is one
+   claim and nothing else.
 5. When it merges, the zone is pushed to Cloudflare within a minute or two.
 
 ### The file
@@ -21,19 +21,26 @@ DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/Hi
 ```json
 {
   "domain": "is-a.ceo",
-  "subdomain": "mc",
-  "owner": "your-github-username",
-  "email": "you@example.com",
-  "repo": "github.com/you/your-repo",
+  "subdomain": "jane",
+  "owner": "jane",
+  "email": "jane@example.com",
+  "repo": "github.com/jane/jane.github.io",
   "description": "My Minecraft server",
   "records": {
-    "A": ["203.0.113.10"],
+    "A": ["8.8.4.4"],
     "SRV": [
-      { "priority": 0, "weight": 5, "port": 25565, "target": "mc.is-a.ceo" }
+      { "priority": 0, "weight": 5, "port": 25565, "target": "mc.example.com" }
     ]
   }
 }
 ```
+
+Two things in that example are deliberate. `8.8.4.4` stands in for whatever
+public IPv4 address you host on: the documentation ranges (`203.0.113.0/24`,
+`198.51.100.0/24`, `2001:db8::/32`) are rejected by the validator like any other
+non-public address, so do not test with them. And the SRV target points at a
+host outside this zone, because a service record that names the name it sits on
+is a CNAME loop the moment anyone adds one.
 
 | Field         | Required | Notes                                                                     |
 | ------------- | -------- | ------------------------------------------------------------------------- |
@@ -132,6 +139,24 @@ Single-label claims are checked against the reserved and blocked lists in
 `domains/_meta.json`. Dotted, wildcard, and apex names skip that check
 because they are specific already.
 
+### What your pull request may contain
+
+One claim, one file. A pull request adds `domains/<subdomain>.<zone>.json`, plus
+`domains/_vercel.<name>.<zone>.json` if Vercel asked for a proof. Five checks
+enforce that shape:
+
+| Rule | Why |
+| --- | --- |
+| Only files in `domains/`, plus the documentation. | A claim and a validator change are reviewed differently and revert differently. |
+| `dnsconfig.js`, `scripts/`, `test/`, `.github/`, `domains/_meta.json` and `domains/SCHEMA.json` are maintainer-only. | Those decide what everyone else may claim. |
+| At most four files under `domains/`. | One claim plus its Vercel sidecar is the real maximum. |
+| The file name matches the `subdomain` and `domain` inside it. | The filename is what the reviewer reads first. |
+| Two-space indent and a final newline. | Keeps `git diff` readable. |
+
+Deleting an entry is a maintainer action, even your own: ask a maintainer to
+release the name. Editing your own entry to change its records is fine.
+
+
 The label also has to be a name, not a word. Pronouns (`me`, `we`, `they`,
 `you`, `us`, `him`, `her`, `them`), determiners (`the`, `this`, `any`,
 `every`), and grammar words (`and`, `if`, `not`, `what`) are refused by the
@@ -178,18 +203,29 @@ arrays, so you can have several of one type. Examples:
 
 ```json
 "records": {
-  "A":    ["203.0.113.10", "203.0.113.11"],
-  "AAAA": ["2001:db8::10"],
-  "CNAME": ["example.github.io"],
+  "A":    ["8.8.4.4", "1.1.1.1"],
+  "AAAA": ["2606:4700:4700::1111"],
   "TXT":  ["v=spf1 include:_spf.google.com -all"],
   "MX":   [{ "priority": 10, "target": "mx.example.com" }],
   "NS":   ["ns1.example.com", "ns2.example.com"],
-  "SRV":  [{ "priority": 0, "weight": 5, "port": 25565, "target": "mc.is-a.ceo" }],
+  "SRV":  [{ "priority": 0, "weight": 5, "port": 25565, "target": "mc.example.com" }],
   "CAA":  [{ "flag": 0, "tag": "issue", "value": "letsencrypt.org" }]
 }
 ```
 
-An apex (`@`) entry cannot use `CNAME`; use `A`/`AAAA` there.
+These are separate record *types*, not one entry: a single file holds the types
+for its own name. `CNAME` appears on its own because it cannot share a name with
+`A`, `AAAA`, `MX`, `NS`, `SRV` or `PTR`:
+
+```json
+"records": {
+  "CNAME": ["your-project.pages.dev"]
+}
+```
+
+An apex (`@`) entry cannot use `CNAME`; use `A`/`AAAA` there. `TXT` and `CAA`
+may sit next to a CNAME only when the entry is `"proxied": true`; on an
+unproxied CNAME, DNSControl rejects the pair and the push fails.
 
 ### The Cloudflare proxy
 
