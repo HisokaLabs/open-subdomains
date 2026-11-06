@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -31,9 +33,24 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           git fetch --no-tags --depth=1 origin "pull/${PR_NUMBER}/head:prhead"
-          git checkout prhead -- domains/ 2>/dev/null || echo 'this PR changes nothing under domains/'
-          git checkout HEAD -- domains/_meta.json domains/SCHEMA.json
-          git status --porcelain -- domains/ | head -50
+          # Only regular .json files are copied, so a symlinked entry cannot
+          # make this runner read a path outside the checkout.
+          changed=$(git diff --name-only --no-renames "${{ github.event.pull_request.base.sha }}...prhead" -- domains/ | grep -E '^domains/[^/]+\.json$' || true)
+          if [ -z "$changed" ]; then
+            echo 'this PR changes nothing under domains/'
+          fi
+          for file in $changed; do
+            if git cat-file -e "prhead:$file" 2>/dev/null; then
+              mkdir -p "$(dirname "$file")"
+              git show "prhead:$file" > "$file"
+              echo "took $file from the pull request"
+            else
+              rm -f "$file"
+              echo "removed $file, as the pull request does"
+            fi
+          done
+          # The maintainer-owned files always come from the base branch.
+          git checkout HEAD -- domains/_meta.json domains/SCHEMA.json domains/_example.json
 
       - name: Decide what to report
         id: build

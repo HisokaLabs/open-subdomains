@@ -55,17 +55,19 @@
     "records": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Omit entirely to get the GitHub Pages default.",
+      "description": "Omit entirely to get the GitHub Pages default. Each type accepts at most 20 values, and an empty array is refused.",
       "properties": {
         "A": {
           "type": "array",
           "items": { "type": "string", "format": "ipv4" },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 20
         },
         "AAAA": {
           "type": "array",
           "items": { "type": "string" },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 20
         },
         "CNAME": {
           "oneOf": [
@@ -81,11 +83,13 @@
         "TXT": {
           "type": "array",
           "items": { "type": "string", "maxLength": 255 },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 20
         },
         "MX": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 20,
           "items": {
             "type": "object",
             "required": ["priority", "target"],
@@ -99,11 +103,13 @@
         "NS": {
           "type": "array",
           "items": { "type": "string" },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 20
         },
         "SRV": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 20,
           "items": {
             "type": "object",
             "required": ["priority", "weight", "port", "target"],
@@ -119,6 +125,7 @@
         "CAA": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 20,
           "items": {
             "type": "object",
             "required": ["flag", "tag", "value"],
@@ -133,7 +140,8 @@
         "PTR": {
           "type": "array",
           "items": { "type": "string" },
-          "minItems": 1
+          "minItems": 1,
+          "maxItems": 20
         }
       }
     }

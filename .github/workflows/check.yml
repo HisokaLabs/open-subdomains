@@ -62,10 +62,13 @@ jobs:
 
       - if: steps.filter.outputs.registry == 'true' && github.event_name == 'pull_request'
         name: Fetch the base branch
-        run: git fetch --no-tags origin "$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF" || true
+        run: git fetch --no-tags origin "$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
 
       - if: steps.filter.outputs.registry == 'true'
         name: Validate domains/*.json
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          REQUIRE_BASE_REF: '1'
         run: npm run check
 
       - if: steps.filter.outputs.registry == 'true'

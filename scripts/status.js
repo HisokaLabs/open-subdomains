@@ -1,3 +1,5 @@
+"use strict";
+
 const fs = require("node:fs");
 const path = require("node:path");
 const https = require("node:https");
@@ -7,6 +9,7 @@ const dns = require("node:dns").promises;
 
 const DOMAINS_DIR = path.join(__dirname, "..", "domains");
 const TIMEOUT_MS = 12000;
+const MAX_BODY_BYTES = 512 * 1024;
 
 function readEntries() {
   return fs
@@ -15,7 +18,7 @@ function readEntries() {
     .filter((name) => !["_meta.json", "_example.json", "SCHEMA.json"].includes(name))
     .filter((name) => !path.basename(name, ".json").startsWith("_"))
     .map((name) => JSON.parse(fs.readFileSync(path.join(DOMAINS_DIR, name), "utf8")))
-    .sort((a, b) => a.subdomain.localeCompare(b.subdomain));
+    .sort((a, b) => `${a.subdomain}.${a.domain}`.localeCompare(`${b.subdomain}.${b.domain}`));
 }
 
 function flatten(records, type) {
@@ -23,6 +26,14 @@ function flatten(records, type) {
   const value = records[type];
   if (value === undefined) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 async function resolveFqdn(fqdn) {
@@ -42,19 +53,28 @@ async function resolveFqdn(fqdn) {
 
 function fetchOnce(url) {
   return new Promise((resolve) => {
+    let settled = false;
     const options = { headers: { "user-agent": "is-a.ceo status check" }, timeout: TIMEOUT_MS };
     const transport = url.startsWith("http:") ? http : https;
     const request = transport.get(url, options, (response) => {
       const hash = crypto.createHash("sha256");
       let body = "";
       let head = "";
+      let bytes = 0;
       response.setEncoding("utf8");
       response.on("data", (chunk) => {
-        hash.update(chunk);
-        if (head.length < 20000) head += chunk;
-        body += chunk;
+        bytes += Buffer.byteLength(chunk);
+        if (bytes <= MAX_BODY_BYTES) {
+          hash.update(chunk);
+          if (head.length < 20000) head += chunk;
+          body += chunk;
+          return;
+        }
+        response.destroy();
       });
-      response.on("end", () => {
+      const finish = () => {
+        if (settled) return;
+        settled = true;
         const title = (body.match(/<title[^>]*>([^<]*)/i) || [])[1];
         const digest = response.statusCode === 200 && body.length > 0 ? hash.digest("hex").slice(0, 16) : null;
         resolve({
@@ -65,16 +85,33 @@ function fetchOnce(url) {
           title: title ? title.trim().slice(0, 60) : null,
           digest,
         });
-      });
+      };
+      response.on("end", finish);
+      response.on("close", finish);
     });
     request.on("timeout", () => request.destroy(new Error("timeout")));
-    request.on("error", (error) => resolve({ status: 0, error: error.code || error.message }));
+    request.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      resolve({ status: 0, error: error.code || error.message });
+    });
   });
 }
 
 async function probe(fqdn) {
   const first = await fetchOnce(`https://${fqdn}/`);
-  if (first.status >= 300 && first.status < 400 && first.location) return fetchOnce(first.location);
+  if (first.status >= 300 && first.status < 400 && first.location) {
+    const next = first.location.startsWith("http")
+      ? first.location
+      : new URL(first.location, `https://${fqdn}/`).toString();
+    if (hostOf(next) !== hostOf(`https://${fqdn}/`)) {
+      return { ...first, note: `redirect to ${hostOf(next) || "an unparseable URL"} not followed` };
+    }
+    if (!next.startsWith("https:") && !next.startsWith("http:")) {
+      return { ...first, note: "redirect to a non-HTTP scheme not followed" };
+    }
+    return fetchOnce(next);
+  }
   return first;
 }
 
@@ -84,14 +121,17 @@ function verdict(entry, live, probeResult) {
   if (probeResult.status === 0) return "TLS or connection failed";
   if (probeResult.vercelError === "DEPLOYMENT_NOT_FOUND") return "Vercel project has no production deployment";
   if (probeResult.status >= 400) return `HTTP ${probeResult.status}`;
+  if (probeResult.note) return probeResult.note;
   return "ok";
 }
 
 async function main() {
-  const zone = JSON.parse(fs.readFileSync(path.join(DOMAINS_DIR, "_meta.json"), "utf8"))._meta.zones[0];
+  const meta = JSON.parse(fs.readFileSync(path.join(DOMAINS_DIR, "_meta.json"), "utf8"))._meta;
+  const zones = Array.isArray(meta.zones) ? meta.zones.map((z) => String(z).toLowerCase()) : [];
   const entries = readEntries();
   const rows = [];
   for (const entry of entries) {
+    const zone = String(entry.domain || zones[0] || "").toLowerCase();
     const fqdn = entry.subdomain === "@" ? zone : `${entry.subdomain}.${zone}`;
     const live = await resolveFqdn(fqdn);
     const probeResult = live.a.length > 0 ? await probe(fqdn) : { status: 0, error: "no address" };
@@ -121,10 +161,14 @@ async function main() {
     const shared = collisions.find((group) => group.names.includes(row.name));
     if (shared) row.verdict = `serves identical bytes as ${shared.names.filter((n) => n !== row.name).join(", ")}`;
   }
-  const report = { zone, checked: new Date().toISOString(), collisions, rows };
+  const report = { zone: zones[0] || "", zones, checked: new Date().toISOString(), collisions, rows };
   if (process.argv.includes("--json")) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     if (collisions.length > 0 && process.argv.includes("--strict")) process.exitCode = 1;
+    return;
+  }
+  if (rows.length === 0) {
+    process.stdout.write("no registry entries to probe\n");
     return;
   }
   const width = Math.max(...rows.map((row) => row.name.length));

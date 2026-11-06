@@ -11,9 +11,6 @@
   "records": {
     "CNAME": [
       "your-project.pages.dev"
-    ],
-    "TXT": [
-      "example-verification=1234567890"
     ]
   }
 }

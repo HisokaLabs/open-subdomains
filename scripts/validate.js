@@ -13,6 +13,10 @@ const META_PATH = path.join(DOMAINS_DIR, "_meta.json");
 
 const RESERVED_FILENAMES = new Set(["_meta.json", "_example.json", "SCHEMA.json"]);
 
+const MAX_RECORDS_PER_TYPE = 20;
+
+const MAX_FILE_BYTES = 64 * 1024;
+
 const { classifyLabel } = require("./name-classes.js");
 
 class ValidationError extends Error {
@@ -34,6 +38,13 @@ function isValidationError(err) {
 
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeOwner(value) {
+  return String(value === undefined || value === null ? "" : value)
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
 }
 
 function preflightEntry(file, entry, meta) {
@@ -108,15 +119,15 @@ function advisoryCheck(file, entry, meta) {
   const sidecar = [];
   if (records.TXT !== undefined) sidecar.push("TXT");
   if (records.CAA !== undefined) sidecar.push("CAA");
-  if (hasCname && sidecar.length > 0) {
+  if (hasCname && sidecar.length > 0 && entry.proxied !== true) {
     const sub = typeof entry.subdomain === "string" ? entry.subdomain.trim() : "";
     const zone = typeof entry.domain === "string" ? entry.domain.trim() : "";
     const ownName = sub && zone ? `${sub}.${zone}` : "this name";
     warnings.push({
       file,
       message:
-        `${file}: records.${sidecar.join(" and records.")} sits on the same name as a CNAME. ` +
-        `DNSControl refuses to apply that ("cannot have CNAME and TXT record with same name"), ` +
+        `${file}: records.${sidecar.join(" and records.")} sits on the same name as an unproxied CNAME. ` +
+        `DNSControl refuses to apply that ("cannot have CNAME and ${sidecar[0]} record with same name"), ` +
         `so the DNS push will fail after merge. Move the ${sidecar.join("/")} to its own dotted ` +
         `name, e.g. "subdomain": "_vercel.${sub || "<name>"}" in domains/_vercel.${sub || "<name>"}.${zone || "<zone>"}.json.` +
         ` Current name: ${ownName}.`,
@@ -366,11 +377,26 @@ function loadBaseMeta() {
   return readMetaAt(`origin/${base}`) || readMetaAt(base);
 }
 
+function baseMetaForPr() {
+  const author = normalizeOwner(process.env.PR_AUTHOR);
+  if (!author) return null;
+  const base = process.env.GITHUB_BASE_REF || "main";
+  const baseMeta = readMetaAt(`origin/${base}`) || readMetaAt(base);
+  if (!baseMeta && process.env.REQUIRE_BASE_REF === "1") {
+    fail(
+      `domains/_meta.json: the base branch "${base}" could not be read, so the ` +
+        `maintainer-only rules on this file cannot be checked. Fetch the base branch ` +
+        `(git fetch origin ${base}) and run again; the check refuses to pass blind`,
+    );
+  }
+  return baseMeta;
+}
+
 const POLICY_LISTS = ["blocked", "reservedClasses", "reserved"];
 
 function checkMetaPolicy(meta, baseMeta) {
   if (!baseMeta) return;
-  const author = String(process.env.PR_AUTHOR || "").trim().replace(/^@/, "").toLowerCase();
+  const author = normalizeOwner(process.env.PR_AUTHOR);
   if (!author) return;
   if (baseMeta.maintainers.includes(author)) return;
 
@@ -474,10 +500,15 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
   if (typeof owner !== "string" || owner.length === 0) {
     fail(`${where}: missing "owner"`);
   }
-  if (owner.length > 39) fail(`${where}: owner "${owner}" is longer than 39 characters`);
+  const ownerKey = normalizeOwner(owner);
+  if (ownerKey.length === 0) fail(`${where}: missing "owner"`);
+  if (ownerKey.length > 39) fail(`${where}: owner "${owner}" is longer than 39 characters`);
+  if (/[\x00-\x1f\x7f]/.test(owner)) {
+    fail(`${where}: owner "${owner}" contains a control character; write the plain GitHub username`);
+  }
 
   const zoneWide = sub === "@" || sub === "*" || (sub.startsWith("_") && !sub.includes("."));
-  if (zoneWide && !meta.maintainers.includes(owner.toLowerCase().trim())) {
+  if (zoneWide && !meta.maintainers.includes(ownerKey)) {
     fail(
       `${where}: "${sub}" is a zone-wide name, so maintainers hold it; it covers every name in ${zone}, ` +
         `not just one. Put your own record one label deeper`,
@@ -486,12 +517,12 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
 
   const auxiliary = sub.includes(".") && sub.split(".")[0].startsWith("_");
   if (!zoneWide && !sub.startsWith("*.") && !auxiliary) {
-    const ownerKey = `${zone}/${owner.toLowerCase()}`;
-    if (claims.has(ownerKey)) {
-      fail(`${where}: owner "${owner}" already has ${claims.get(ownerKey)} in ${zone}, one subdomain per person`);
+    const claimKey = `${zone}/${ownerKey}`;
+    if (claims.has(claimKey)) {
+      fail(`${where}: owner "${owner}" already has ${claims.get(claimKey)} in ${zone}, one subdomain per person`);
     }
-    claims.set(ownerKey, `${sub}.${zone}`);
-    subOwners.set(`${zone}/${sub}`, owner.toLowerCase());
+    claims.set(claimKey, `${sub}.${zone}`);
+    subOwners.set(`${zone}/${sub}`, ownerKey);
   }
 
   if (entry.email !== undefined && !validEmail(entry.email)) {
@@ -520,6 +551,12 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
   for (const key of Object.keys(records)) {
     if (!allowed.includes(key)) {
       fail(`${where}: records.${key} is not a supported record type (${allowed.join(", ")})`);
+    }
+    if (Array.isArray(records[key]) && records[key].length === 0) {
+      fail(`${where}: records.${key} is an empty array; remove the key instead`);
+    }
+    if (Array.isArray(records[key]) && records[key].length > MAX_RECORDS_PER_TYPE) {
+      fail(`${where}: records.${key} has ${records[key].length} values, the limit is ${MAX_RECORDS_PER_TYPE}`);
     }
   }
 
@@ -623,6 +660,12 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
         ["issue", "issuewild", "iodef"].includes(c.tag) &&
         typeof c.value === "string" && c.value.length > 0 && c.value.length <= 255;
       if (!ok) fail(`${where}: CAA entries must look like { "flag": 0, "tag": "issue", "value": "letsencrypt.org" } (tag: issue|issuewild|iodef, flag: 0|128)`);
+      // eslint-disable-next-line no-control-regex
+      if (/[\x00-\x1f\x7f]/.test(c.value)) fail(`${where}: CAA values must not contain control characters`);
+      // An iodef value is a URL, so it is the one tag that may carry a scheme.
+      if (c.tag !== "iodef" && /[/\s]/.test(c.value)) {
+        fail(`${where}: CAA "${c.tag}" values are a bare domain, e.g. "letsencrypt.org", not a URL`);
+      }
       norm.CAA.push(c);
     });
   }
@@ -708,8 +751,9 @@ function checkOwnedBase(file, entry, subOwners) {
 
 function checkNonJsonClaims(problems) {
   if (!fs.existsSync(DOMAINS_DIR)) return;
+  const subdirectories = [];
   for (const name of fs.readdirSync(DOMAINS_DIR).sort()) {
-    if (name.startsWith(".") || name.toLowerCase().endsWith(".json")) continue;
+    if (name.startsWith(".")) continue;
     const full = path.join(DOMAINS_DIR, name);
     let stat;
     try {
@@ -717,7 +761,12 @@ function checkNonJsonClaims(problems) {
     } catch {
       continue;
     }
+    if (stat.isDirectory()) {
+      subdirectories.push(name);
+      continue;
+    }
     if (!stat.isFile()) continue;
+    if (name.toLowerCase().endsWith(".json")) continue;
     let looksLikeClaim = false;
     try {
       const parsed = JSON.parse(fs.readFileSync(full, "utf8"));
@@ -733,6 +782,16 @@ function checkNonJsonClaims(problems) {
         `and the DNS config glob both skip it; rename it to "${name}.json"`,
     });
   }
+
+  if (subdirectories.length > 0) {
+    problems.push({
+      file: null,
+      message:
+        `domains/ contains ${subdirectories.length === 1 ? "a subdirectory" : "subdirectories"} ` +
+        `(${subdirectories.slice(0, 5).map((d) => `"${d}"`).join(", ")}); registry entries are kept ` +
+        `flat in domains/ so every file is named <subdomain>.<zone>.json and checked before it reaches DNS`,
+    });
+  }
 }
 
 function checkMisplacedRootFiles() {
@@ -746,15 +805,18 @@ function checkMisplacedRootFiles() {
   for (const rf of fs.readdirSync(ROOT)) {
     if (!rf.endsWith(".json") || knownRootConfigs.has(rf)) continue;
     const full = path.join(ROOT, rf);
+    // The read is the only part that may fail on a user-supplied file: a root
+    // JSON that does not parse is not this rule's business. The check below sits
+    // outside the catch so a match still throws, instead of being swallowed by
+    // the same handler that tolerates a bad file.
+    let looksLikeEntry = false;
     try {
       const parsed = JSON.parse(fs.readFileSync(full, "utf8"));
-      if (isPlainObject(parsed) && (parsed.domain || parsed.subdomain)) {
-        fail(`${rf}: domain files must be placed in the domains/ directory, not in the repository root`);
-      }
+      looksLikeEntry = isPlainObject(parsed) && (parsed.domain || parsed.subdomain);
     } catch {
-      // Ignored if file cannot be parsed as JSON
+      looksLikeEntry = false;
     }
-    if (rf.split(".").length >= 3) {
+    if (looksLikeEntry || rf.split(".").length >= 3) {
       fail(`${rf}: domain files must be placed in the domains/ directory, not in the repository root`);
     }
   }
@@ -788,7 +850,7 @@ function main() {
   let meta;
   try {
     meta = loadMeta();
-    checkMetaPolicy(meta, loadBaseMeta());
+    checkMetaPolicy(meta, baseMetaForPr() || loadBaseMeta());
   } catch (err) {
     if (!isValidationError(err)) throw err;
     problems.push({ file: null, message: err.message });
@@ -815,11 +877,43 @@ function main() {
   for (const file of files) {
     const full = path.join(DOMAINS_DIR, file);
     const snap = snapshotState(seen, claims, subOwners);
+
+    let lstats;
+    try {
+      lstats = fs.lstatSync(full);
+    } catch {
+      problems.push({ file, message: `${file}: could not be read` });
+      continue;
+    }
+    if (!lstats.isFile()) {
+      problems.push({
+        file,
+        message:
+          `${file}: registry entries must be regular files; a symlink or device is not ` +
+          `accepted, because it reads a path this repository does not control`,
+      });
+      continue;
+    }
+
+    let raw;
+    try {
+      raw = fs.readFileSync(full, "utf8");
+    } catch {
+      problems.push({ file, message: `${file}: could not be read` });
+      continue;
+    }
+    if (raw.length > MAX_FILE_BYTES) {
+      problems.push({ file, message: `${file}: file is larger than ${MAX_FILE_BYTES} bytes` });
+      continue;
+    }
+
     let parsed;
     try {
-      parsed = JSON.parse(fs.readFileSync(full, "utf8"));
+      parsed = JSON.parse(raw);
     } catch (err) {
-      problems.push({ file, message: `${file}: invalid JSON, ${err.message}` });
+      const position = /at position (\d+)/.exec(err.message);
+      const detail = position ? ` at position ${position[1]}` : "";
+      problems.push({ file, message: `${file}: invalid JSON${detail}; check for a missing comma, a trailing comma or a smart quote` });
       continue;
     }
     const preflight = preflightEntry(file, parsed, meta);
@@ -861,6 +955,8 @@ function checkSharedTargets(entries) {
   const byTarget = new Map();
   for (const { file, entry } of entries) {
     const records = isPlainObject(entry.records) ? entry.records : {};
+    const zone = String(entry.domain).toLowerCase();
+    const owner = normalizeOwner(entry.owner);
     for (const kind of ["CNAME", "A", "AAAA"]) {
       const raw = records[kind];
       const values = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
@@ -868,29 +964,29 @@ function checkSharedTargets(entries) {
         if (typeof value !== "string") continue;
         const target = value.trim().toLowerCase().replace(/\.$/, "");
         if (target.length === 0) continue;
-        const key = `${kind}:${target}`;
-        const owner = String(entry.owner).toLowerCase();
-        const name = `${entry.subdomain}.${entry.domain}`;
+        // Two entities are only the same site inside one zone, so the key keeps
+        // the zone; the same A record in two zones is two independent hosts.
+        const key = `${zone}:${kind}:${target}`;
+        const name = entry.subdomain === "@" ? zone : `${entry.subdomain}.${zone}`;
         const sharing = byTarget.get(key);
         if (sharing) {
-          if (sharing.owner !== owner) {
-            sharing.entries.push({ file, name });
-          }
+          if (sharing.owner !== owner) sharing.entries.push({ file, name, owner });
           continue;
         }
-        byTarget.set(key, { owner, name, entries: [{ file, name }] });
+        byTarget.set(key, { owner, zone, kind, target, name, entries: [{ file, name, owner }] });
       }
     }
   }
-  for (const [key, sharing] of byTarget) {
+  for (const sharing of byTarget.values()) {
     if (sharing.entries.length < 2) continue;
-    const target = key.slice(key.indexOf(":") + 1);
     for (const { file, name } of sharing.entries) {
-      const others = sharing.entries.filter((e) => e.name !== name).map((e) => e.name);
+      const others = sharing.entries
+        .filter((e) => e.name !== name)
+        .map((e) => (e.owner === normalizeOwner(sharing.entries[0].owner) ? e.name : `${e.name} (@${e.owner})`));
       problems.push({
         file,
         message:
-          `${file}: records.${key.slice(0, key.indexOf(":"))} "${target}" is also used by ` +
+          `${file}: records.${sharing.kind} "${sharing.target}" is also used by ` +
           `${others.join(", ")} for a different owner; two names cannot serve one site, ` +
           `so point this at your own host`,
       });

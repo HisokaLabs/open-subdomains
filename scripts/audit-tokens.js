@@ -54,16 +54,14 @@ async function main() {
       if (!match) continue;
       const declaredFor = match[1].toLowerCase();
       const expectedFor = ownerName === "@" || ownerName === "*" ? zone : `${ownerName}.${zone}`;
-      const host = declaredFor.replace(`${zone}`, "") ? declaredFor : `${sub}.${zone}`;
       tokens.push({
         file,
         owner: entry.owner,
-        txtName: `${sub}.${zone}`,
+        txtName: sub === "@" ? zone : `${sub}.${zone}`,
         declaredFor,
         expectedFor,
         token: match[2],
         matches: declaredFor === expectedFor,
-        host,
       });
     }
   }

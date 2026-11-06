@@ -17,7 +17,7 @@ var GITHUB_PAGES_AAAA = ['2606:50c1:8000::153', '2606:50c1:8001::153', '2606:50c
 
 function getDomainsList(filesPath) {
 	var result = [];
-	var files = glob.apply(null, [filesPath, true, '.json']);
+	var files = glob.apply(null, [filesPath, false, '.json']);
 
 	files.forEach(function (file) {
 		var basename = file.split('/').pop().split('\\').pop();
@@ -50,12 +50,35 @@ function addRecord(zone, record) {
 	recordsByZone[zone].push(record);
 }
 
+
+function managedZones() {
+	var meta = require('./domains/_meta.json');
+	var body = meta._meta || meta;
+	var list = body.zones;
+	if (!list || !list.length) {
+		throw new Error('dnsconfig: domains/_meta.json lists no zones, refusing to push');
+	}
+	return list.map(function (zone) {
+		return String(zone).toLowerCase();
+	});
+}
+
+var ZONES = managedZones();
+
 var domains = getDomainsList('./domains');
+
+var refused = [];
 
 domains.forEach(function (entry) {
 	var data = entry.data;
-	var zone = data.domain;
+	var zone = String(data.domain).toLowerCase();
 	var name = data.subdomain;
+
+	if (ZONES.indexOf(zone) === -1) {
+		refused.push(entry.file + ' claims zone "' + zone + '", which is not in _meta.json zones');
+		return;
+	}
+
 	var proxyState = data.proxied === true ? PROXY.on : PROXY.off;
 	var records = data.records;
 
@@ -106,9 +129,10 @@ domains.forEach(function (entry) {
 	});
 });
 
-// One zone per zone seen in the data. A zone with no entries simply is not
-// declared, and a zone name that is not set up in the Cloudflare account
-// fails the push, which keeps typos out.
+if (refused.length > 0) {
+	throw new Error('dnsconfig: refusing to push, the registry names unmanaged zones:\n  ' + refused.join('\n  '));
+}
+
 Object.keys(recordsByZone).forEach(function (zone) {
 	D(zone, REG_NONE, DNS_PROVIDER, recordsByZone[zone]);
 });

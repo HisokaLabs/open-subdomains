@@ -80,37 +80,51 @@ const BASE_REF = process.env.GITHUB_BASE_REF || "main";
 
 function changedFiles() {
   if (process.env.CHANGED_FILES) {
+    const text = process.env.CHANGED_FILES;
+    let list;
     try {
-      const parsed = JSON.parse(process.env.CHANGED_FILES);
-      if (Array.isArray(parsed)) {
-        return parsed.filter(
-          (f) => typeof f === "string" && f.toLowerCase().endsWith(".json") && !isReservedFile(f)
-        );
-      }
+      const parsed = JSON.parse(text);
+      list = Array.isArray(parsed) ? parsed : null;
     } catch {
-      return process.env.CHANGED_FILES.split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l.toLowerCase().endsWith(".json") && !isReservedFile(l));
+      list = null;
     }
+    if (list === null) list = text.split("\n").map((line) => line.trim());
+    return list.filter(
+      (f) => typeof f === "string" && f.length > 0 && f.toLowerCase().endsWith(".json") && !isReservedFile(f),
+    );
   }
 
   const base = process.env.GITHUB_BASE_REF || "main";
   const diffStrategies = [
-    ["diff", "--name-only", "--diff-filter=ACMRD", `origin/${base}...HEAD`, "--", "domains"],
-    ["diff", "--name-only", "--diff-filter=ACMRD", `${base}...HEAD`, "--", "domains"],
-    ["diff", "--name-only", "--diff-filter=ACMRD", "HEAD~1...HEAD", "--", "domains"],
-    ["status", "--porcelain", "--", "domains"],
+    ["diff", "--no-renames", "--name-only", "--diff-filter=ACMRD", `origin/${base}...HEAD`, "--", "domains"],
+    ["diff", "--no-renames", "--name-only", "--diff-filter=ACMRD", `${base}...HEAD`, "--", "domains"],
+    ["diff", "--no-renames", "--name-only", "--diff-filter=ACMRD", "HEAD~1...HEAD", "--", "domains"],
   ];
 
+  let answered = false;
   for (const args of diffStrategies) {
     const output = runGit(args);
-    if (output !== null) {
-      const lines = output
-        .split("\n")
-        .map((l) => (l.length >= 3 && /^[ MADRCU?!]{1,2}\s/.test(l) ? l.slice(3) : l).trim())
-        .filter((l) => l.toLowerCase().endsWith(".json") && !isReservedFile(l));
-      if (lines.length > 0) return lines;
-    }
+    if (output === null) continue;
+    answered = true;
+    const lines = output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => line.toLowerCase().endsWith(".json") && !isReservedFile(line));
+    if (lines.length > 0) return lines;
+  }
+
+  // No diff could narrow the set down, but git was reachable: the PR is clean.
+  if (answered) return [];
+
+  // git itself is unavailable, so fall back to whatever is on disk.
+  const status = runGit(["status", "--porcelain", "--", "domains"]);
+  if (status !== null && status.trim().length > 0) {
+    const lines = status
+      .split("\n")
+      .map((l) => (l.length >= 3 && /^[ MADRCU?!]{1,2}\s/.test(l) ? l.slice(3) : l).trim())
+      .filter((l) => l.toLowerCase().endsWith(".json") && !isReservedFile(l));
+    if (lines.length > 0) return lines;
   }
 
   if (fs.existsSync(DOMAINS_DIR)) {
@@ -212,8 +226,8 @@ function main() {
       const current = baseOwnerUsername(parsed);
       if (previous && current && previous !== current) {
         takeovers.push(
-          `${file}: owner changes from "${previous}" to "${current}"; an existing claim cannot change hands ` +
-            `through a pull request. Ask a maintainer to transfer it`
+          `${file}: owner changes from "${previous || previousId}" to "${current || currentId}"; ` +
+            `an existing claim cannot change hands through a pull request. Ask a maintainer to transfer it`
         );
       }
     }
@@ -244,4 +258,8 @@ function main() {
   console.log(`verify-owners: ${files.length} file(s) verified against PR author "${prAuthor}"`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { normalizeUsername, getRawOwner };
