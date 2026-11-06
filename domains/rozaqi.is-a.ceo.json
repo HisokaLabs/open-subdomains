@@ -1,0 +1,11 @@
+{
+  "$schema": "./SCHEMA.json",
+  "domain": "is-a.ceo",
+  "subdomain": "rozaqi",
+  "owner": "alfathrzqii",
+  "records": {
+    "A": [
+      "129.221.146.240"
+    ]
+  }
+}
