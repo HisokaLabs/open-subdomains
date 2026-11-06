@@ -99,11 +99,16 @@ function matchesCodePath(file) {
 
 /**
  * @param {Array<{status: string, path: string}>} files
- * @param {{isMaintainer: boolean, root?: string}} context
+ * @param {{isMaintainer: boolean, scope?: boolean, root?: string}} context
  * @returns {Array<{file: (string|null), message: string}>}
+ *
+ * `scope` says whether the change is being judged as somebody's pull request.
+ * The rules it gates all ask "may this author touch this path", which needs an
+ * author to answer; a local run has none, so it checks the file rules only.
  */
 function checkFormat(files, context) {
   const root = context.root || ROOT;
+  const scoped = context.scope !== false;
   const problems = [];
   const push = (message, file) => problems.push({ file: file || null, message });
 
@@ -113,6 +118,7 @@ function checkFormat(files, context) {
   const deletedClaims = claimFiles.filter((f) => f.status === "D");
 
   for (const { status, path: file } of files) {
+    if (!scoped) continue;
     if (!file.startsWith("domains/") && !matchesMaintainerPath(file) && !matchesCodePath(file)) {
       if (!DOC_PATHS.includes(file) && !/^docs\//.test(file)) {
         push(
@@ -144,7 +150,7 @@ function checkFormat(files, context) {
 
   // A claim PR is one or two files: the claim itself, plus the Vercel sidecar
   // that proves ownership of it. Anything wider is a different kind of change.
-  if (!context.isMaintainer && claimFiles.length > MAX_FILES_PER_CLAIM_PR) {
+  if (scoped && !context.isMaintainer && claimFiles.length > MAX_FILES_PER_CLAIM_PR) {
     push(
       `this pull request touches ${claimFiles.length} files under domains/; a claim PR adds one ` +
         `entry (plus its _vercel.<name> sidecar if Vercel asked for one). ` +
@@ -204,26 +210,45 @@ function checkFormat(files, context) {
   return problems;
 }
 
-function isMaintainerAuthor() {
-  const author = String(process.env.PR_AUTHOR || "").trim().replace(/^@/, "").toLowerCase();
-  if (!author) return false;
+function maintainerList() {
   const metaPath = path.join(ROOT, "domains", "_meta.json");
-  if (!fs.existsSync(metaPath)) return false;
+  if (!fs.existsSync(metaPath)) return [];
   try {
     const raw = JSON.parse(fs.readFileSync(metaPath, "utf8"));
     const meta = raw._meta || raw;
     const list = Array.isArray(meta.maintainers) ? meta.maintainers : [];
-    return list.map((m) => String(m).toLowerCase()).includes(author);
+    return list.map((m) => String(m).trim().replace(/^@/, "").toLowerCase());
   } catch {
-    return false;
+    return [];
   }
 }
 
-function report(problems) {
+function isMaintainerAuthor() {
+  const author = String(process.env.PR_AUTHOR || "").trim().replace(/^@/, "").toLowerCase();
+  if (!author) return false;
+  return maintainerList().includes(author);
+}
+
+/**
+ * Whether this run knows whose pull request it is judging. In CI the workflow
+ * passes PR_AUTHOR; a local `npm run verify` on a branch passes nothing, and
+ * the scope rules cannot answer "is this author allowed to touch this path"
+ * without an author, so they are skipped rather than guessed.
+ */
+function knowsAuthor() {
+  return String(process.env.PR_AUTHOR || "").trim().length > 0;
+}
+
+function report(problems, scoped) {
   if (JSON_MODE) {
     process.stdout.write(`${JSON.stringify({ ok: problems.length === 0, problems }, null, 2)}\n`);
   } else if (problems.length === 0) {
-    console.log("check-format: the change follows the repository layout");
+    console.log(
+      scoped
+        ? "check-format: the change follows the repository layout"
+        : "check-format: the changed entries follow the repository layout " +
+          "(no PR_AUTHOR, so the per-author scope rules were not applied)",
+    );
   } else {
     console.error("check-format: this pull request does not follow the repository layout.\n");
     for (const problem of problems) console.error(`  - ${problem.message}`);
@@ -238,17 +263,21 @@ function report(problems) {
 function main() {
   const files = changedFiles();
   if (files === null) {
-    report([
-      {
-        file: null,
-        message:
-          `check-format: could not read the changed files (git diff against ${baseRef()} failed). ` +
-          `Fetch the base branch, then run again.`,
-      },
-    ]);
+    report(
+      [
+        {
+          file: null,
+          message:
+            `check-format: could not read the changed files (git diff against ${baseRef()} failed). ` +
+            `Fetch the base branch, then run again.`,
+        },
+      ],
+      true,
+    );
     return;
   }
-  report(checkFormat(files, { isMaintainer: isMaintainerAuthor() }));
+  const scoped = knowsAuthor();
+  report(checkFormat(files, { isMaintainer: isMaintainerAuthor(), scope: scoped }), scoped);
 }
 
 if (require.main === module) {

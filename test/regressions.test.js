@@ -413,6 +413,30 @@ test("a maintainer may change dnsconfig.js and _meta.json", () => {
   assert.deepEqual(problems, []);
 });
 
+test("a local run without an author does not apply the scope rules", () => {
+  // npm run verify has no PR_AUTHOR. The scope rules ask "may this author touch
+  // this path", which nobody can answer then, so they are skipped: a maintainer
+  // working on the validator must not be told their own change is off limits.
+  const problems = checkFormat(
+    [
+      { status: "M", path: "scripts/validate.js" },
+      { status: "M", path: ".github/workflows/check.yml" },
+    ],
+    { isMaintainer: false, scope: false },
+  );
+  assert.deepEqual(problems, []);
+});
+
+test("a local run still checks the file rules it can answer", () => {
+  const dir = makeRegistry({ "jh.is-a.ceo.json": { ...labelled("someone-else") } });
+  const problems = checkFormat([{ status: "A", path: "domains/jh.is-a.ceo.json" }], {
+    isMaintainer: false,
+    scope: false,
+    root: dir,
+  });
+  assert.match(problems.map((p) => p.message).join("\n"), /must be named/);
+});
+
 test("a claim file whose name disagrees with its contents is refused", () => {
   const dir = makeRegistry({ "jh.is-a.ceo.json": { ...labelled("someone-else") } });
   const problems = checkFormat([{ status: "A", path: "domains/jh.is-a.ceo.json" }], {
