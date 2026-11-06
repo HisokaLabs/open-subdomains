@@ -8,12 +8,10 @@ DNS zone is deployed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/Hi
 2. Copy [`domains/_example.json`](domains/_example.json) to
    `domains/<your-subdomain>.is-a.ceo.json` (for example `mc.is-a.ceo.json`).
    The filename must be exactly `<subdomain>.<zone>.json`.
-3. Run `npm run check`, `npm test` and `npm run check:format` locally so you see
-   the same verdict as CI.
+3. Run `npm run verify` locally so you see the same verdict as CI.
 4. Open a pull request against `main` and fill in the template. The `check`
    workflow validates the entry, confirms `owner` is your own GitHub username,
-   and previews the DNS diff. The `format` workflow confirms the change is one
-   claim and nothing else.
+   confirms the change is one claim and nothing else, and previews the DNS diff.
 5. When it merges, the zone is pushed to Cloudflare within a minute or two.
 
 ### The file

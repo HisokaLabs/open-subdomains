@@ -59,7 +59,7 @@ The zones this registry is allowed to touch are listed in `domains/_meta.json` u
 | `test/validate.test.js` | Node test suite covering every validator rule. |
 | `test/regressions.test.js` | Cases for the defects fixed after the first release. |
 | `.github/pull_request_template.md` | The form every pull request fills in. |
-| `.github/workflows/` | format, check, push, registry-comment, health, guard, stale, label. |
+| `.github/workflows/` | check, push, registry-comment, health, guard, stale, label. |
 
 Two rules keep the validator and the push in step. `domains/` is read one level
 deep by both `validate.js` and the `glob()` in `dnsconfig.js`, so an entry in a
@@ -72,10 +72,16 @@ The registry ships with two infrastructure entries, `@.is-a.ceo.json` (zone apex
 ### Run the tests
 
 ```bash
+npm run verify        # check, check:format and the full suite, in one command
 npm run check         # validate the real registry in domains/
 npm run check:format  # check this branch's PR shape against main
-npm test              # the full suite, 126 cases, no dependencies
+npm test              # the full suite, 128 cases, no dependencies
 ```
+
+`npm run verify` is what CI runs, so a local pass means the same verdict. It
+runs without a `PR_AUTHOR`, and the per-author scope rules ("only a maintainer
+may touch this path") need one to answer, so a local run checks the file rules
+and skips those. CI always passes `PR_AUTHOR`, so it applies both.
 
 `test/validate.test.js` covers the record rules and the owner checks.
 `test/regressions.test.js` covers the defects that were fixed later: a file in a
@@ -120,8 +126,7 @@ DNSControl expands `$CLOUDFLARE_API_TOKEN` from the environment, so no secret ev
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `format.yml` | every PR | Checks the change is one claim file, correctly named, with nothing else touched. |
-| `check.yml` | PR, push main | Validates `domains/`, verifies owners, runs `dnscontrol check`. |
+| `check.yml` | PR, push main | Checks the PR shape, validates `domains/`, verifies owners, runs `dnscontrol check`. |
 | `push.yml` | push main | Runs `dnscontrol push` against Cloudflare. |
 | `registry-comment.yml` | PR from a fork | Explains the failure in a comment, using the base branch's scripts. |
 | `health.yml` | every 30 min | Probes every zone's SOA; opens an issue when a zone is down. |
@@ -129,13 +134,16 @@ DNSControl expands `$CLOUDFLARE_API_TOKEN` from the environment, so no secret ev
 | `stale.yml` | daily | Marks idle PRs stale and closes them a week later. |
 | `label.yml` | PR | Labels PRs by changed files (subdomain, scripts, docs, ci). |
 
-Two of these are split deliberately. `format.yml` runs on every pull request
-because the shape rules apply whether or not the change touches `domains/`, and
-`check.yml` keeps its own filter so a docs-only PR does not spend time pushing a
-zone check. `registry-comment.yml` runs on `pull_request_target` so it can
-comment on a fork's PR, which is why it checks out the base branch and copies in
-only the PR's `domains/*.json` files: a fork must not be able to rewrite the
-script that judges it.
+`check.yml` holds two jobs on purpose. `format` runs on every pull request,
+because the shape rules apply whether or not the change touches `domains/`.
+`validate` keeps a filter so a docs-only PR does not spend time pushing a zone
+check, which is exactly why the two cannot share one job: a single job would
+have to either run the zone check on every PR or skip the shape rules on docs.
+
+`registry-comment.yml` runs on `pull_request_target` so it can comment on a
+fork's PR, which is why it checks out the base branch and copies in only the
+PR's `domains/*.json` files: a fork must not be able to rewrite the script that
+judges it.
 
 ## Deployment
 
