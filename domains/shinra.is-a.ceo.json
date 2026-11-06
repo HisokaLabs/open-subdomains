@@ -1,0 +1,11 @@
+{
+  "$schema": "./SCHEMA.json",
+  "domain": "is-a.ceo",
+  "subdomain": "shinra",
+  "owner": "SeventID",
+  "repo": "github.com/SeventID/Shinra",
+  "description": "Personal projects and services",
+  "records": {
+    "A": ["172.104.170.118"]
+  }
+}
