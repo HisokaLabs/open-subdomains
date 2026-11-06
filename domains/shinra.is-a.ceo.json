@@ -1,11 +1,15 @@
+
 {
   "$schema": "./SCHEMA.json",
   "domain": "is-a.ceo",
   "subdomain": "shinra",
   "owner": "SeventID",
   "repo": "github.com/SeventID/Shinra",
-  "description": "Personal projects and services",
+  "description": "Personal portfolio, projects, and services",
+  "proxied": true,
   "records": {
-    "A": ["103.119.237.53"]
+    "CNAME": [
+      "b8b4d515-7ee8-43c1-9f44-14d2942d1956.cfargotunnel.com"
+    ]
   }
 }
