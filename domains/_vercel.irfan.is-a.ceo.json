@@ -1,0 +1,11 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "_vercel.irfan",
+  "owner": "rtwone",
+  "description": "ceo katanya",
+  "records": {
+    "TXT": [
+      "vc-domain-verify=irfan.is-a.ceo,a70bcdeca0220ff0a4da"
+    ]
+  }
+}
