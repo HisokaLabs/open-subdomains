@@ -1,0 +1,9 @@
+{
+  "domain": "is-a.ceo",
+  "subdomain": "buzzel",
+  "owner": "fasoft9-star",
+  "description": "blog",
+  "records": {
+    "CNAME": ["bujel.duckdns.org"]
+  }
+}
