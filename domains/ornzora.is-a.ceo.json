@@ -2,7 +2,7 @@
   "domain": "is-a.ceo",
   "subdomain": "ornzora",
   "owner": "Ornzora",
-  "repo": "github.com/Ornzora/my",
+  "repo": "github.com/Ornzora",
   "description": "A little piece of me",
   "records": {
     "CNAME": "1e5e9fe308449798.vercel-dns-017.com."
