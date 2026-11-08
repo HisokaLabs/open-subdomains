@@ -546,3 +546,27 @@ test("the fold maps leetspeak onto the plain word", () => {
   assert.equal(fold("$tatus"), "status");
   assert.equal(fold("jane"), "jane");
 });
+
+test("the claim-one-entry rule stays quiet outside a pull request", () => {
+  // On the base branch the diff against its own upstream is every unpushed
+  // commit, not a change set, so the scope rules must step aside.
+  const dir = makeRegistry({ [claimFile("jane")]: entry() });
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-q", "-m", "base"]);
+  git(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+  for (let i = 0; i < 6; i += 1) {
+    fs.writeFileSync(
+      path.join(dir, "domains", claimFile(`name${i}`)),
+      `${JSON.stringify({ owner: { ...FULL }, records: { CNAME: `${i}.example.com` } }, null, 2)}\n`,
+    );
+  }
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-q", "-m", "six entries on main"]);
+
+  const onMain = run(dir, { PR_AUTHOR: "jisoa", PR_AUTHOR_ID: "9001" });
+  assert.equal(onMain.code, 0, `a direct commit on main is not a claim PR:\n${onMain.out}`);
+
+  cleanup(dir);
+});

@@ -29,6 +29,22 @@ function baseName() {
   return process.env.GITHUB_BASE_REF || "main";
 }
 
+/**
+ * Whether this run is judging a pull request rather than a branch.
+ *
+ * GITHUB_BASE_REF is the reliable signal, and it is what CI sets. PR_AUTHOR is
+ * not enough on its own: a local run can pass it to exercise the claimant rules
+ * while sitting on main, and the six entries that person already committed are
+ * not a claim pull request. On the base branch the diff against its own upstream
+ * is every unpushed commit, so the scope rules step aside.
+ */
+function judgingPullRequest() {
+  if (process.env.GITHUB_BASE_REF) return true;
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch === null) return true;
+  return branch.trim() !== baseName();
+}
+
 function changedFiles() {
   const fromEnv = process.env.CHANGED_FILES;
   if (fromEnv && fromEnv.trim()) {
@@ -50,6 +66,8 @@ function changedFiles() {
       .filter((arg) => !arg.startsWith("--"))
       .map((file) => ({ status: "?", path: file.replace(/\\/g, "/") }));
   }
+
+  if (!judgingPullRequest()) return null;
 
   for (const range of [`origin/${baseName()}...HEAD`, `${baseName()}...HEAD`]) {
     const out = git(["diff", "--no-renames", "--name-status", range]);
