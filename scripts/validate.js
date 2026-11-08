@@ -4,1005 +4,716 @@
 
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
-const net = require("node:net");
 const path = require("node:path");
 
-const ROOT = path.resolve(__dirname, "..");
-const DOMAINS_DIR = path.join(ROOT, "domains");
-const META_PATH = path.join(DOMAINS_DIR, "_meta.json");
-
-const RESERVED_FILENAMES = new Set(["_meta.json", "_example.json", "SCHEMA.json"]);
-
-const MAX_RECORDS_PER_TYPE = 20;
-
-const MAX_FILE_BYTES = 64 * 1024;
-
-const { classifyLabel } = require("./name-classes.js");
-
-class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-function fail(message) {
-  throw new ValidationError(message);
-}
+const R = require("./registry.js");
 
 const JSON_MODE = process.argv.includes("--json");
 
-function isValidationError(err) {
-  return err instanceof ValidationError;
-}
+const CLAIM_LIMIT = 4;
 
-function isPlainObject(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const CODE_PATHS = ["scripts/", "test/", "dnsconfig.js", "package.json", "package-lock.json"];
+const POLICY_PATHS = ["registry/"];
+const CI_PATHS = [".github/"];
+const DOCS = new Set(["README.md", "CONTRIBUTING.md", "AGENTS.md", "LICENSE", ".gitignore", ".gitattributes"]);
 
-function normalizeOwner(value) {
-  return String(value === undefined || value === null ? "" : value)
-    .trim()
-    .replace(/^@/, "")
-    .toLowerCase();
-}
-
-function preflightEntry(file, entry, meta) {
-  const problems = [];
-  const push = (message) => problems.push({ file, message: `${file}: ${message}` });
-
-  if (!isPlainObject(entry)) {
-    push("entry must be a single JSON object (one entry per file, not an array or a bare string)");
-    return problems;
-  }
-
-  const allowedKeys = new Set([
-    "$schema", "_about", "domain", "subdomain", "owner", "email",
-    "proxied", "repo", "description", "records",
-  ]);
-  for (const key of Object.keys(entry)) {
-    if (!allowedKeys.has(key)) {
-      push(`unknown key "${key}" (allowed: ${[...allowedKeys].join(", ")})`);
-    }
-  }
-
-  if (typeof entry.domain !== "string" || entry.domain.trim().length === 0) {
-    push('missing "domain" (the zone this subdomain belongs to, e.g. "is-a.ceo")');
-  } else if (meta && meta.zones.length > 0) {
-    const zone = entry.domain.toLowerCase().trim();
-    if (!meta.zones.includes(zone)) {
-      push(`zone "${zone}" is not a managed zone (${meta.zones.join(", ")})`);
-    }
-  }
-
-  if (typeof entry.subdomain !== "string" || entry.subdomain.trim().length === 0) {
-    push('missing "subdomain" (the label you are claiming, e.g. "mc")');
-  }
-
-  if (entry.owner === undefined) {
-    push('missing "owner" (your GitHub username as a plain string, e.g. "octocat")');
-  } else if (isPlainObject(entry.owner)) {
-    const guess = entry.owner.username || entry.owner.name || entry.owner.login || "";
-    push(
-      '"owner" must be a plain username string, not an object' +
-        (guess ? `; write "owner": "${guess}" instead of "owner": { "username": "${guess}" }` : ""),
-    );
-  } else if (typeof entry.owner !== "string" || entry.owner.trim().length === 0) {
-    push('"owner" must be a non-empty string (your GitHub username)');
-  }
-
-  if (entry.records !== undefined && !isPlainObject(entry.records)) {
-    push('"records" must be an object keyed by record type, e.g. { "CNAME": "you.vercel.app" }');
-  }
-
-  return problems;
-}
-
-function advisoryCheck(file, entry, meta) {
-  const warnings = [];
-  if (isPlainObject(entry) && meta && Array.isArray(meta.advisoryClasses) && meta.advisoryClasses.length > 0) {
-    const sub = typeof entry.subdomain === "string" ? entry.subdomain.trim() : "";
-    const genericClass = sub && !sub.includes(".") && sub !== "@" && sub !== "*" ? classifyLabel(sub, meta.advisoryClasses) : null;
-    if (genericClass) {
-      warnings.push({
-        file,
-        message:
-          `${file}: "${sub}" is ${genericClass.label} (${genericClass.why}). ` +
-          `This passes the schema, but a maintainer is likely to ask for a personal handle ` +
-          `before merging, because a shared word is claimed once and then unavailable to everyone else.`,
-      });
-    }
-  }
-  if (!isPlainObject(entry) || !isPlainObject(entry.records)) return warnings;
-  const records = entry.records;
-  const hasCname = records.CNAME !== undefined;
-  const sidecar = [];
-  if (records.TXT !== undefined) sidecar.push("TXT");
-  if (records.CAA !== undefined) sidecar.push("CAA");
-  if (hasCname && sidecar.length > 0 && entry.proxied !== true) {
-    const sub = typeof entry.subdomain === "string" ? entry.subdomain.trim() : "";
-    const zone = typeof entry.domain === "string" ? entry.domain.trim() : "";
-    const ownName = sub && zone ? `${sub}.${zone}` : "this name";
-    warnings.push({
-      file,
-      message:
-        `${file}: records.${sidecar.join(" and records.")} sits on the same name as an unproxied CNAME. ` +
-        `DNSControl refuses to apply that ("cannot have CNAME and ${sidecar[0]} record with same name"), ` +
-        `so the DNS push will fail after merge. Move the ${sidecar.join("/")} to its own dotted ` +
-        `name, e.g. "subdomain": "_vercel.${sub || "<name>"}" in domains/_vercel.${sub || "<name>"}.${zone || "<zone>"}.json.` +
-        ` Current name: ${ownName}.`,
-    });
-  }
-  return warnings;
-}
-
-// One DNS label: optional leading underscore (e.g. _acme-challenge), then
-// the usual letters, digits and hyphens, not ending in a hyphen.
-const LABEL_RE = /^_?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-const VERIFY_RE = /^vc-domain-verify=([^,\s]+),([0-9A-Za-z_-]+)$/;
-
-function validLabel(label) {
-  return typeof label === "string" && label.length > 0 && label.length <= 63 && LABEL_RE.test(label);
-}
-
-/**
- * A subdomain is "@", "*", "*.<labels>", or dot-separated labels. Returns
- * the normalized subdomain or null when invalid.
- */
-function validSubdomain(sub, maxLength) {
-  if (sub === "@" || sub === "*") return true;
-  const withoutWildcard = sub.startsWith("*.") ? sub.slice(2) : sub;
-  if (withoutWildcard.length === 0) return false;
-  if (withoutWildcard.length > 253) return false;
-  const labels = withoutWildcard.split(".");
-  if (labels.some((l) => !validLabel(l) || l.length > maxLength)) return false;
-  return true;
-}
-
-function validIPv4(value) {
-  const parts = String(value).split(".");
-  if (parts.length !== 4) return false;
-  return parts.every((p) => /^\d{1,3}$/.test(p) && !/^0\d/.test(p) && Number(p) <= 255);
-}
-
-function validHostname(value) {
-  if (typeof value !== "string") return false;
-  const trimmed = value.trim();
-  const host = trimmed.endsWith(".") ? trimmed.slice(0, -1) : trimmed;
-  if (host.length === 0 || host.length > 253) return false;
-  const labels = host.split(".");
-  return labels.every(
-    (l) => l.length > 0 && l.length <= 63 && /^_?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i.test(l)
-  );
-}
-
-function validRepo(value) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 200) return false;
-  if (/^https?:\/\//i.test(value)) {
-    try {
-      const parsed = new URL(value);
-      return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch {
-      return false;
-    }
-  }
-  // owner/repo or host/owner/repo
-  const withoutGitSuffix = value.replace(/\.git$/i, "");
-  const parts = withoutGitSuffix.split("/").filter(Boolean);
-  if (parts.length < 2 || parts.length > 3) return false;
-  return parts.every((p) => /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(p));
-}
-
-function validEmail(value) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 254) return false;
-  const at = value.lastIndexOf("@");
-  if (at === -1) return false;
-  const local = value.slice(0, at);
-  const domain = value.slice(at + 1);
-  if (local.length === 0 || local.length > 64) return false;
-  if (!/^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$/.test(local)) return false;
-  if (local.startsWith(".") || local.endsWith(".") || local.includes("..")) return false;
-  return validTarget(domain);
-}
-
-// --- Public-internet checks -------------------------------------------------
-// A registry record is reachable from the public internet by definition, so
-// anything that only resolves inside someone's own network is either a
-// misconfiguration or a DNS-rebinding setup. Both are rejected here.
-
-/** base/bits pairs that must never appear as a public A record. */
-const V4_BLOCKED = [
-  ["0.0.0.0", 8], // "this network"
-  ["10.0.0.0", 8], // RFC 1918 private
-  ["100.64.0.0", 10], // CGNAT / carrier & VPN space (Tailscale et al.)
-  ["127.0.0.0", 8], // loopback
-  ["169.254.0.0", 16], // link-local (incl. cloud metadata endpoints)
-  ["172.16.0.0", 12], // RFC 1918 private
-  ["192.0.0.0", 24], // IETF protocol assignments
-  ["192.0.2.0", 24], // TEST-NET-1
-  ["192.168.0.0", 16], // RFC 1918 private
-  ["198.18.0.0", 15], // benchmarking
-  ["198.51.100.0", 24], // TEST-NET-2
-  ["203.0.113.0", 24], // TEST-NET-3
-  ["224.0.0.0", 4], // multicast
-  ["240.0.0.0", 4], // reserved / broadcast
-];
-
-function ipv4ToInt(value) {
-  const p = String(value).split(".").map(Number);
-  return (((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0);
-}
-
-function isPublicIPv4(value) {
-  if (!validIPv4(value)) return false;
-  const addr = ipv4ToInt(value);
-  return !V4_BLOCKED.some(([base, bits]) => {
-    const mask = (0xffffffff << (32 - bits)) >>> 0;
-    return (addr & mask) === (ipv4ToInt(base) & mask);
-  });
-}
-
-/**
- * Expand an IPv6 address into its 8 hextets. Dotted-quad tails (::ffff:1.2.3.4)
- * are returned separately so callers can judge them as IPv4.
- */
-function expandIPv6(value) {
-  if (!net.isIPv6(value)) return null;
-  let addr = value;
-  let embedded = null;
-  if (addr.includes(".")) {
-    const i = addr.lastIndexOf(":");
-    embedded = addr.slice(i + 1);
-    addr = `${addr.slice(0, i + 1)}0:0`;
-  }
-  const halves = addr.split("::");
-  if (halves.length > 2) return null;
-  const head = halves[0] ? halves[0].split(":") : [];
-  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
-  let groups;
-  if (halves.length === 2) {
-    const missing = 8 - head.length - tail.length;
-    if (missing < 1) return null;
-    groups = head.concat(Array(missing).fill("0"), tail);
-  } else {
-    groups = head;
-  }
-  if (groups.length !== 8) return null;
-  const nums = groups.map((g) => parseInt(g, 16));
-  if (nums.some((n) => Number.isNaN(n))) return null;
-  return { nums, embedded };
-}
-
-function isPublicIPv6(value) {
-  const ex = expandIPv6(value);
-  if (!ex) return false;
-  // Anything with a dotted-quad tail is really an IPv4 address in disguise.
-  if (ex.embedded !== null) return isPublicIPv4(ex.embedded);
-  const [a, b, c, d, e, f, g, h] = ex.nums;
-  if (ex.nums.every((n) => n === 0)) return false; // ::
-  if (ex.nums.slice(0, 7).every((n) => n === 0) && ex.nums[7] === 1) return false; // ::1
-  // IPv4-mapped (::ffff:0:0/96) and IPv4-compatible (::/96) ranges carry an
-  // IPv4 address in hextet form too, so they are judged as IPv4.
-  if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && (f === 0xffff || f === 0)) {
-    return isPublicIPv4(`${g >> 8}.${g & 255}.${h >> 8}.${h & 255}`);
-  }
-  if ((a & 0xffc0) === 0xfe80) return false; // link-local fe80::/10
-  if ((a & 0xfe00) === 0xfc00) return false; // unique-local fc00::/7
-  if ((a & 0xff00) === 0xff00) return false; // multicast ff00::/8
-  if (a === 0x2001 && b === 0x0db8) return false; // documentation 2001:db8::/32
-  if (a === 0x64 && b === 0xff9b) {
-    // NAT64 64:ff9b::/96: the low 32 bits embed an IPv4 address.
-    const [g6, g7] = [ex.nums[6], ex.nums[7]];
-    return isPublicIPv4(`${g6 >> 8}.${g6 & 255}.${g7 >> 8}.${g7 & 255}`);
-  }
-  if (a === 0x2002) {
-    // 6to4 2002::/16: hextets 2 and 3 embed an IPv4 address.
-    return isPublicIPv4(`${b >> 8}.${b & 255}.${c >> 8}.${c & 255}`);
-  }
-  return true;
-}
-
-/** Suffixes that only exist inside someone's own machine or LAN. */
-const LOCAL_SUFFIXES = new Set([
-  "localhost", // RFC 6761
-  "local", // mDNS, RFC 6762
-  "home.arpa", // RFC 8375 home networking
-  "internal",
-  "intranet",
-  "lan",
-  "localdomain",
-  "test", // RFC 2606
-  "example", // RFC 2606
-  "invalid", // RFC 2606
-  "ts.net", // Tailscale MagicDNS private networking
-]);
-
-/** True when the host is one of the suffixes or sits underneath it. */
-function hasLocalSuffix(host) {
-  return [...LOCAL_SUFFIXES].some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
-}
-
-/**
- * Record targets (CNAME/MX/NS/SRV/PTR) must be real public hostnames: at
- * least two labels, not an IP literal, and not a local-only name.
- */
-function validTarget(value) {
-  if (typeof value !== "string") return false;
-  const trimmed = value.trim();
-  const host = (trimmed.endsWith(".") ? trimmed.slice(0, -1) : trimmed).toLowerCase();
-  if (!validHostname(host)) return false;
-  const labels = host.split(".");
-  if (labels.length < 2) return false;
-  if (hasLocalSuffix(host)) return false;
-  const tld = labels[labels.length - 1];
-  if (!/^[a-z]{2,63}$/i.test(tld) && !/^xn--[a-z0-9-]{2,59}$/i.test(tld)) return false;
-  return true;
-}
-
-function loadMetaFrom(raw) {
-  const parsed = JSON.parse(raw);
-  const meta = parsed._meta || parsed;
-  const policy = meta.namePolicy || {};
-  return {
-    zones: (meta.zones || []).map((s) => String(s).toLowerCase()),
-    maintainers: (meta.maintainers || []).map((s) => String(s).toLowerCase()),
-    reserved: (meta.reserved || []).map((s) => String(s).toLowerCase()),
-    blocked: (meta.blocked || []).map((s) => String(s).toLowerCase()),
-    maxLength: typeof meta.maxLength === "number" ? meta.maxLength : 63,
-    reservedClasses: (policy.reservedClasses || []).map((s) => String(s).toLowerCase()),
-    advisoryClasses: (policy.advisoryClasses || []).map((s) => String(s).toLowerCase()),
-  };
-}
-
-function loadMeta() {
-  if (!fs.existsSync(META_PATH)) fail("domains/_meta.json not found");
-  return loadMetaFrom(fs.readFileSync(META_PATH, "utf8"));
-}
-
-function readMetaAt(ref) {
+function git(args) {
   try {
-    const raw = execFileSync("git", ["show", `${ref}:domains/_meta.json`], {
-      cwd: ROOT,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return loadMetaFrom(raw);
+    return execFileSync("git", args, { cwd: R.ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   } catch {
     return null;
   }
 }
 
-function loadBaseMeta() {
-  const base = process.env.GITHUB_BASE_REF || "main";
-  return readMetaAt(`origin/${base}`) || readMetaAt(base);
+function baseName() {
+  return process.env.GITHUB_BASE_REF || "main";
 }
 
-function baseMetaForPr() {
-  const author = normalizeOwner(process.env.PR_AUTHOR);
-  if (!author) return null;
-  const base = process.env.GITHUB_BASE_REF || "main";
-  const baseMeta = readMetaAt(`origin/${base}`) || readMetaAt(base);
-  if (!baseMeta && process.env.REQUIRE_BASE_REF === "1") {
-    fail(
-      `domains/_meta.json: the base branch "${base}" could not be read, so the ` +
-        `maintainer-only rules on this file cannot be checked. Fetch the base branch ` +
-        `(git fetch origin ${base}) and run again; the check refuses to pass blind`,
-    );
+function changedFiles() {
+  const fromEnv = process.env.CHANGED_FILES;
+  if (fromEnv && fromEnv.trim()) {
+    let list;
+    try {
+      const parsed = JSON.parse(fromEnv);
+      list = Array.isArray(parsed) ? parsed : null;
+    } catch {
+      list = null;
+    }
+    if (!list) list = fromEnv.split("\n").map((line) => line.trim());
+    return list.filter(Boolean).map((file) => ({ status: "?", path: file.replace(/\\/g, "/") }));
   }
-  return baseMeta;
+
+  const flag = process.argv.indexOf("--files");
+  if (flag !== -1) {
+    return process.argv
+      .slice(flag + 1)
+      .filter((arg) => !arg.startsWith("--"))
+      .map((file) => ({ status: "?", path: file.replace(/\\/g, "/") }));
+  }
+
+  for (const range of [`origin/${baseName()}...HEAD`, `${baseName()}...HEAD`]) {
+    const out = git(["diff", "--no-renames", "--name-status", range]);
+    if (out === null) continue;
+    return out
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [status, ...rest] = line.split(/\s+/);
+        return { status: status[0], path: rest.join(" ").replace(/\\/g, "/") };
+      });
+  }
+  return null;
 }
 
-const POLICY_LISTS = ["blocked", "reservedClasses", "reserved"];
+function baseFile(file) {
+  const ref = `origin/${baseName()}`;
+  return git(["show", `${ref}:${file}`]) ?? git(["show", `${baseName()}:${file}`]);
+}
 
-function checkMetaPolicy(meta, baseMeta) {
-  if (!baseMeta) return;
-  const author = normalizeOwner(process.env.PR_AUTHOR);
-  if (!author) return;
-  if (baseMeta.maintainers.includes(author)) return;
-
-  const where = "domains/_meta.json";
-  const added = meta.maintainers.filter((m) => !baseMeta.maintainers.includes(m));
-  if (added.length > 0) {
-    fail(
-      `${where}: this pull request adds ${added.map((a) => `"${a}"`).join(", ")} to "maintainers"; ` +
-        `only an existing maintainer can grant that`,
-    );
+function basePolicy() {
+  const files = ["zones.json", "reserved.json", "blocked.json", "trusted.json"];
+  const out = {};
+  for (const file of files) {
+    const raw = baseFile(`registry/${file}`);
+    if (raw === null) return null;
+    try {
+      out[file] = JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
+  return {
+    zones: out["zones.json"].map((z) => String(z).toLowerCase()),
+    reserved: new Set(out["reserved.json"].map((w) => String(w).toLowerCase())),
+    blocked: new Set(out["blocked.json"].map((w) => String(w).toLowerCase())),
+    trusted: out["trusted.json"].map((p) => ({
+      username: String(p.username || "").toLowerCase(),
+      id: Number.isInteger(p.id) ? p.id : null,
+      admin: p.admin === true,
+    })),
+  };
+}
 
-  for (const key of POLICY_LISTS) {
-    const dropped = baseMeta[key].filter((v) => !meta[key].includes(v));
-    if (dropped.length > 0) {
-      fail(
-        `${where}: this pull request drops ${dropped.slice(0, 5).map((d) => `"${d}"`).join(", ")} from "${key}"; ` +
-          `only a maintainer can loosen the name policy`,
-      );
+function checkLayout(problems) {
+  const push = (message) => problems.push({ file: null, message });
+
+  for (const name of fs.readdirSync(R.ROOT)) {
+    if (!name.endsWith(".json")) continue;
+    if (["package.json", "package-lock.json", "creds.json", "tsconfig.json"].includes(name)) continue;
+    if (name.split(".").length >= 3) {
+      push(`${name}: entries live in domains/, not the repository root`);
     }
   }
 
-  if (JSON.stringify(meta.zones) !== JSON.stringify(baseMeta.zones)) {
-    fail(`${where}: this pull request changes "zones"; only a maintainer can change which zones are served`);
-  }
-
-  if (meta.maxLength > baseMeta.maxLength) {
-    fail(`${where}: this pull request raises "maxLength" from ${baseMeta.maxLength} to ${meta.maxLength}; only a maintainer can loosen the name policy`);
-  }
-}
-
-function validateEntry(file, entry, meta, seen, subOwners) {
-  const where = file;
-
-  if (!isPlainObject(entry)) fail(`${where}: entry must be a single JSON object (one entry per file)`);
-
-  // Mirrors SCHEMA.json's additionalProperties: false. A key that the site and
-  // dnsconfig.js both ignore is a typo waiting to be trusted.
-  const allowedKeys = new Set([
-    "$schema", "_about", "domain", "subdomain", "owner", "email",
-    "proxied", "repo", "description", "records",
-  ]);
-  for (const key of Object.keys(entry)) {
-    if (!allowedKeys.has(key)) fail(`${where}: unknown key "${key}" (allowed: ${[...allowedKeys].join(", ")})`);
-  }
-
-  if (typeof entry.domain !== "string" || entry.domain.length === 0) {
-    fail(`${where}: missing "domain" (the zone this subdomain belongs to)`);
-  }
-  if (entry.domain !== entry.domain.toLowerCase().trim()) {
-    fail(`${where}: "domain" must be lowercase`);
-  }
-  const zone = entry.domain.toLowerCase().trim();
-  if (!validHostname(zone)) {
-    fail(`${where}: "${entry.domain}" is not a valid zone name`);
-  }
-  if (meta.zones.length > 0 && !meta.zones.includes(zone)) {
-    fail(`${where}: zone "${zone}" is not a managed zone (${meta.zones.join(", ")})`);
-  }
-
-  if (typeof entry.subdomain !== "string" || entry.subdomain.length === 0) {
-    fail(`${where}: missing "subdomain"`);
-  }
-  if (entry.subdomain !== entry.subdomain.toLowerCase().trim()) {
-    fail(`${where}: "subdomain" must be lowercase`);
-  }
-
-  const sub = entry.subdomain.toLowerCase().trim();
-  if (!validSubdomain(sub, meta.maxLength)) {
-    fail(`${where}: "${entry.subdomain}" is not a valid subdomain (use "@", "*", "*.<labels>", or dot-separated labels)`);
-  }
-
-  // The filename must be <subdomain>.<zone>.json so a PR diff always names
-  // the full record, and two zones can claim the same label without clashing.
-  const expectedFile = `${sub}.${zone}.json`;
-  if (path.basename(file) !== expectedFile) {
-    fail(`${where}: file must be named "${expectedFile}"`);
-  }
-
-  const seenKey = `${zone}/${sub}`;
-  if (seen.has(seenKey)) fail(`${where}: "${sub}" is already defined in ${zone}`);
-  seen.add(seenKey);
-
-  // Reserved and blocked names only apply to plain single-label claims; a
-  // dotted name like _acme-challenge.app is specific enough to stand on its
-  // own, and "@" is the zone itself.
-  if (!sub.includes(".") && sub !== "@" && sub !== "*") {
-    if (meta.reserved.includes(sub)) fail(`${where}: "${sub}" is reserved by the registry`);
-    if (meta.blocked.includes(sub)) fail(`${where}: "${sub}" is blocked by the registry`);
-    const reservedClass = classifyLabel(sub, meta.reservedClasses);
-    if (reservedClass) {
-      fail(
-        `${where}: "${sub}" is ${reservedClass.label}, and this registry keeps those names unclaimed ` +
-          `(${reservedClass.why}); pick a personal handle instead`,
-      );
-    }
-  }
-
-  if (typeof entry.owner === "string") entry.owner = entry.owner.trim();
-  const owner = entry.owner;
-  if (typeof owner !== "string" || owner.length === 0) {
-    fail(`${where}: missing "owner"`);
-  }
-  const ownerKey = normalizeOwner(owner);
-  if (ownerKey.length === 0) fail(`${where}: missing "owner"`);
-  if (ownerKey.length > 39) fail(`${where}: owner "${owner}" is longer than 39 characters`);
-  if (/[\x00-\x1f\x7f]/.test(owner)) {
-    fail(`${where}: owner "${owner}" contains a control character; write the plain GitHub username`);
-  }
-
-  const zoneWide = sub === "@" || sub === "*" || (sub.startsWith("_") && !sub.includes("."));
-  if (zoneWide && !meta.maintainers.includes(ownerKey)) {
-    fail(
-      `${where}: "${sub}" is a zone-wide name, so maintainers hold it; it covers every name in ${zone}, ` +
-        `not just one. Put your own record one label deeper`,
-    );
-  }
-
-  const auxiliary = sub.includes(".") && sub.split(".")[0].startsWith("_");
-  if (!zoneWide && !sub.startsWith("*.") && !auxiliary) {
-    subOwners.set(`${zone}/${sub}`, ownerKey);
-  }
-
-  if (entry.email !== undefined && !validEmail(entry.email)) {
-    fail(`${where}: "email" must be a valid email address, e.g. you@example.com`);
-  }
-  if (entry.repo !== undefined && !validRepo(entry.repo)) {
-    fail(`${where}: "repo" must be a hostname, e.g. github.com/you/repo`);
-  }
-  if (entry.description !== undefined && typeof entry.description !== "string") {
-    fail(`${where}: "description" must be a string`);
-  }
-  if (entry.proxied !== undefined && typeof entry.proxied !== "boolean") {
-    fail(`${where}: "proxied" must be true or false`);
-  }
-
-  const records = entry.records;
-  if (records === undefined) {
-    // Nothing specified at all: the entry gets the GitHub Pages default.
+  if (!fs.existsSync(R.DOMAINS_DIR)) {
+    push("domains/ not found");
     return;
   }
-  if (!isPlainObject(records)) {
-    fail(`${where}: "records" must be an object keyed by record type`);
-  }
 
-  const allowed = ["A", "AAAA", "CNAME", "TXT", "MX", "NS", "SRV", "CAA", "PTR"];
-  for (const key of Object.keys(records)) {
-    if (!allowed.includes(key)) {
-      fail(`${where}: records.${key} is not a supported record type (${allowed.join(", ")})`);
+  const dirs = [];
+  for (const name of fs.readdirSync(R.DOMAINS_DIR)) {
+    if (name.startsWith(".")) continue;
+    const full = path.join(R.DOMAINS_DIR, name);
+    const stat = fs.lstatSync(full);
+    if (stat.isDirectory()) {
+      dirs.push(name);
+      continue;
     }
-    if (Array.isArray(records[key]) && records[key].length === 0) {
-      fail(`${where}: records.${key} is an empty array; remove the key instead`);
-    }
-    if (Array.isArray(records[key]) && records[key].length > MAX_RECORDS_PER_TYPE) {
-      fail(`${where}: records.${key} has ${records[key].length} values, the limit is ${MAX_RECORDS_PER_TYPE}`);
+    if (!name.endsWith(".json")) {
+      push(`domains/${name}: every entry filename ends in .json, so the validator and dnsconfig.js both see it`);
     }
   }
+  if (dirs.length > 0) {
+    push(`domains/ holds subdirectories (${dirs.slice(0, 5).join(", ")}); entries stay flat so each one is checked before it reaches DNS`);
+  }
+}
 
-  if (sub === "@" && records.CNAME !== undefined) {
-    fail(`${where}: the zone apex cannot use CNAME records, use A/AAAA instead`);
-  }
-  if (sub === "@" && records.NS !== undefined) {
-    fail(`${where}: the zone apex cannot delegate via NS records`);
-  }
+function checkPolicyChange(problems, policy, base, actor, author) {
+  if (!base || !author) return;
+  const push = (message) => problems.push({ file: null, message });
 
-  const norm = { A: [], AAAA: [], CNAME: [], TXT: [], MX: [], NS: [], SRV: [], CAA: [], PTR: [] };
-
-  if (records.A !== undefined) {
-    if (!Array.isArray(records.A)) fail(`${where}: records.A must be an array`);
-    records.A.forEach((v) => {
-      if (!isPublicIPv4(v)) fail(`${where}: "${v}" is not a public IPv4 address`);
-      norm.A.push(v);
-    });
-  }
-  if (records.AAAA !== undefined) {
-    if (!Array.isArray(records.AAAA)) fail(`${where}: records.AAAA must be an array`);
-    records.AAAA.forEach((v) => {
-      if (!isPublicIPv6(v)) fail(`${where}: "${v}" is not a public IPv6 address`);
-      norm.AAAA.push(v);
-    });
-  }
-  if (records.CNAME !== undefined) {
-    if (typeof records.CNAME !== "string" && !Array.isArray(records.CNAME)) {
-      fail(`${where}: records.CNAME must be a string or array of strings`);
+  const wasTrusted = R.trustedBy(base, author);
+  if (!wasTrusted) {
+    const added = policy.trusted.filter(
+      (person) => !base.trusted.some((old) => (person.id && old.id === person.id) || old.username === person.username),
+    );
+    if (added.length > 0) {
+      push(`registry/trusted.json: this pull request adds ${added.map((p) => `"${p.username}"`).join(", ")}; only an admin can grant trust`);
     }
-    const rawCname = Array.isArray(records.CNAME) ? records.CNAME : [records.CNAME];
-    if (rawCname.length === 0) {
-      fail(`${where}: records.CNAME cannot be empty`);
+    for (const [key, file] of [["reserved", "reserved.json"], ["blocked", "blocked.json"]]) {
+      const dropped = [...base[key]].filter((word) => !policy[key].has(word));
+      if (dropped.length > 0) {
+        push(`registry/${file}: this pull request drops ${dropped.slice(0, 5).map((w) => `"${w}"`).join(", ")}; only trusted authors can loosen the name policy`);
+      }
     }
-    if (rawCname.length > 1) {
-      fail(`${where}: records.CNAME can only have a single target (DNS forbids multiple CNAMEs on the same name)`);
+    if (policy.zones.join(",") !== base.zones.join(",")) {
+      push("registry/zones.json: only a trusted author can change which zones are served");
     }
-    rawCname.forEach((v) => {
-      if (typeof v !== "string" || !validTarget(v)) {
-        fail(`${where}: "${v}" is not a valid public CNAME target`);
-      }
-      const targetHost = (v.trim().endsWith(".") ? v.trim().slice(0, -1) : v.trim()).toLowerCase();
-      const ownFqdn = sub === "@" ? zone : `${sub}.${zone}`;
-      if (targetHost === ownFqdn || targetHost === zone) {
-        fail(`${where}: CNAME target "${v}" cannot point to itself or the zone apex`);
-      }
-      norm.CNAME.push(v);
-    });
-  }
-  if (records.TXT !== undefined) {
-    if (!Array.isArray(records.TXT)) fail(`${where}: records.TXT must be an array`);
-    const ownFqdn = sub === "@" ? zone : `${sub}.${zone}`;
-    records.TXT.forEach((v) => {
-      if (typeof v !== "string" || v.length === 0) fail(`${where}: TXT values must be non-empty strings`);
-      if (v.length > 255) fail(`${where}: TXT value exceeds 255 characters`);
-      // eslint-disable-next-line no-control-regex
-      if (/[\x00-\x1f\x7f]/.test(v)) fail(`${where}: TXT values must not contain control characters`);
-      const proof = VERIFY_RE.exec(v.trim());
-      if (proof && ownFqdn !== `_vercel.${proof[1].toLowerCase()}`) {
-        fail(
-          `${where}: this Vercel proof verifies "${proof[1]}", so it only counts on ` +
-            `"_vercel.${proof[1].toLowerCase()}", not on ${ownFqdn}`,
-        );
-      }
-      norm.TXT.push(v);
-    });
-  }
-  if (records.MX !== undefined) {
-    if (!Array.isArray(records.MX)) fail(`${where}: records.MX must be an array`);
-    records.MX.forEach((mx) => {
-      if (!isPlainObject(mx) || !Number.isInteger(mx.priority) || !mx.target) {
-        fail(`${where}: MX entries must look like { "priority": 10, "target": "mx.example.com" }`);
-      }
-      if (mx.priority < 0 || mx.priority > 65535) fail(`${where}: MX priority must be 0-65535`);
-      if (!validTarget(mx.target)) fail(`${where}: MX target "${mx.target}" is not a public hostname`);
-      norm.MX.push({ priority: mx.priority, target: mx.target });
-    });
-  }
-  if (records.NS !== undefined) {
-    if (!Array.isArray(records.NS)) fail(`${where}: records.NS must be an array`);
-    records.NS.forEach((v) => {
-      if (!validTarget(v)) fail(`${where}: "${v}" is not a valid public NS target`);
-      norm.NS.push(v);
-    });
-  }
-  if (records.SRV !== undefined) {
-    if (!Array.isArray(records.SRV)) fail(`${where}: records.SRV must be an array`);
-    records.SRV.forEach((s) => {
-      const inRange = (n) => Number.isInteger(n) && n >= 0 && n <= 65535;
-      const ok = isPlainObject(s) && inRange(s.priority) && inRange(s.weight) && inRange(s.port) && validTarget(s.target);
-      if (!ok) {
-        fail(`${where}: SRV entries must look like { "priority": 0, "weight": 5, "port": 25565, "target": "mc.example.com" } (values 0-65535)`);
-      }
-      norm.SRV.push(s);
-    });
-  }
-  if (records.CAA !== undefined) {
-    if (!Array.isArray(records.CAA)) fail(`${where}: records.CAA must be an array`);
-    records.CAA.forEach((c) => {
-      const ok = isPlainObject(c) && (c.flag === 0 || c.flag === 128) &&
-        ["issue", "issuewild", "iodef"].includes(c.tag) &&
-        typeof c.value === "string" && c.value.length > 0 && c.value.length <= 255;
-      if (!ok) fail(`${where}: CAA entries must look like { "flag": 0, "tag": "issue", "value": "letsencrypt.org" } (tag: issue|issuewild|iodef, flag: 0|128)`);
-      // eslint-disable-next-line no-control-regex
-      if (/[\x00-\x1f\x7f]/.test(c.value)) fail(`${where}: CAA values must not contain control characters`);
-      // An iodef value is a URL, so it is the one tag that may carry a scheme.
-      if (c.tag !== "iodef" && /[/\s]/.test(c.value)) {
-        fail(`${where}: CAA "${c.tag}" values are a bare domain, e.g. "letsencrypt.org", not a URL`);
-      }
-      norm.CAA.push(c);
-    });
-  }
-  if (records.PTR !== undefined) {
-    if (!Array.isArray(records.PTR)) fail(`${where}: records.PTR must be an array`);
-    records.PTR.forEach((v) => {
-      if (!validTarget(v)) fail(`${where}: "${v}" is not a valid public PTR target`);
-      norm.PTR.push(v);
-    });
+    return;
   }
 
-  // CNAME is exclusive: RFC 1034/2181 allow no other record type on the same
-  // name. Everything except DNSSEC records is rejected here.
-  const exclusive = ["A", "AAAA", "MX", "NS", "SRV", "PTR"];
-  const clashing = exclusive.filter((kind) => norm[kind].length > 0);
-  if (norm.CNAME.length > 0 && clashing.length > 0) {
-    fail(`${where}: a CNAME cannot coexist with ${clashing.join(", ")} on the same name`);
+  if (!wasTrusted.admin) {
+    const changed =
+      policy.trusted.length !== base.trusted.length ||
+      policy.trusted.some((person) => !base.trusted.some((old) => old.username === person.username && old.id === person.id && old.admin === person.admin));
+    if (changed) push("registry/trusted.json: only an admin can change the trusted list");
+  }
+}
+
+function checkOwner(file, entry, author, actor) {
+  const where = file;
+  const owner = entry.owner;
+
+  if (!R.isPlainObject(owner)) {
+    R.fail(`${where}: "owner" must be an object, e.g. { "username": "jane", "id": 1234567 }`);
+  }
+  for (const key of Object.keys(owner)) {
+    if (!R.OWNER_KEYS.has(key)) R.fail(`${where}: unknown owner key "${key}" (allowed: ${[...R.OWNER_KEYS].join(", ")})`);
   }
 
-  for (const kind of ["A", "AAAA", "CNAME", "TXT", "MX", "NS", "SRV", "CAA", "PTR"]) {
-    const keys = norm[kind].map((v) => {
-      if (typeof v === "string") {
-        return kind === "TXT" ? v : v.trim().toLowerCase().replace(/\.$/, "");
-      }
-      if (kind === "MX") {
-        return JSON.stringify({ priority: v.priority, target: v.target.trim().toLowerCase().replace(/\.$/, "") });
-      }
-      if (kind === "SRV") {
-        return JSON.stringify({
-          priority: v.priority,
-          weight: v.weight,
-          port: v.port,
-          target: v.target.trim().toLowerCase().replace(/\.$/, ""),
-        });
-      }
-      return JSON.stringify(v);
-    });
-    if (new Set(keys).size !== keys.length) fail(`${where}: records.${kind} contains a duplicate value`);
+  // Any one of the three identifies the holder, so none of them is required on
+  // its own. The rule is only that the object is not empty.
+  const hasUsername = typeof owner.username === "string" && owner.username.trim().length > 0;
+  const hasId = owner.id !== undefined;
+  const hasEmail = typeof owner.email === "string" && owner.email.trim().length > 0;
+
+  if (!hasUsername && !hasId && !hasEmail) {
+    R.fail(
+      `${where}: "owner" is empty. Give at least one of "username", "id" or "email": ` +
+        `"username" is your GitHub handle, "id" is the number in https://api.github.com/users/<handle>, ` +
+        `and "email" is an address a maintainer can reach`,
+    );
   }
 
-  // An entry pointing nowhere is not useful; every record-only shape that a
-  // real service needs is accepted below.
-  const hasAddressing = norm.A.length + norm.AAAA.length + norm.CNAME.length > 0;
-  const hasOnlyTxt = norm.TXT.length > 0 && !hasAddressing;
-  const hasDelegation = norm.NS.length > 0;
-  const hasMail = norm.MX.length > 0;
-  const hasService = norm.SRV.length > 0;
-  const hasReverse = norm.PTR.length > 0;
-  if (!hasAddressing && !hasOnlyTxt && !hasDelegation && !hasMail && !hasService && !hasReverse) {
-    fail(`${where}: must define at least one of records.A, AAAA, CNAME, MX, NS, SRV, PTR, or TXT alone`);
+  if (owner.username !== undefined) {
+    if (!hasUsername) R.fail(`${where}: owner.username is empty; remove the key or write your GitHub handle`);
+    const username = owner.username.trim();
+    if (username.length > 39) R.fail(`${where}: owner.username is longer than the 39 characters GitHub allows`);
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(username)) {
+      R.fail(`${where}: owner.username "${username}" is not a GitHub handle (letters, digits and single hyphens)`);
+    }
+  }
+
+  if (owner.id !== undefined && (!Number.isInteger(owner.id) || owner.id <= 0)) {
+    R.fail(`${where}: owner.id must be the numeric GitHub account id, e.g. 1234567`);
+  }
+
+  if (owner.email !== undefined && !R.validEmail(owner.email)) {
+    R.fail(`${where}: owner.email must be a valid address, e.g. "you@example.com"`);
   }
 }
 
 /**
- * A wildcard "*.base" or an auxiliary record such as "_acme-challenge.base"
- * may only sit on a name its owner already holds, or an attacker could claim
- * every child of someone else's subdomain and issue TLS certificates for it
- * or forge their mail policy. Service discovery records (SRV, e.g.
- * _minecraft._tcp.mc) carry no such privilege and stay open.
+ * Ties the claim to whoever opened the pull request. A trusted author edits any
+ * entry they like; everyone else only their own. The numeric id wins when both
+ * sides have one, because a username can be released and taken again.
+ *
+ * An entry identified only by email has nothing to match against an account, so
+ * the claim is refused rather than waved through: without it, anyone could file
+ * a name under any address they like and the pull request author check would
+ * have nothing to compare.
  */
-function checkOwnedBase(file, entry, subOwners) {
-  const sub = entry.subdomain;
-  if (typeof sub !== "string" || !sub.includes(".")) return;
-  const labels = sub.split(".");
-  const records = isPlainObject(entry.records) ? entry.records : {};
-  const serviceOnly = Array.isArray(records.SRV) &&
-    !records.A && !records.AAAA && !records.CNAME && !records.TXT && !records.MX && !records.NS && !records.PTR;
-  let index = 0;
-  if (labels[0] === "*") {
-    index = 1;
-  } else if (serviceOnly) {
+function checkClaimant(file, entry, author, actor) {
+  if (actor || !author) return;
+  const owner = R.ownerOf(entry);
+  if (!owner) return;
+
+  if (Number.isInteger(owner.id)) {
+    if (!author.id) {
+      R.fail(`${file}: owner.id ${owner.id} cannot be checked because this run does not know the author id`);
+    }
+    if (owner.id !== author.id) {
+      R.fail(
+        `${file}: owner.id ${owner.id} is not the account opening this pull request (${author.id}); ` +
+          `a name cannot be claimed for someone else`,
+      );
+    }
     return;
   }
-  while (index < labels.length - 1 && labels[index].startsWith("_")) index += 1;
-  const base = labels.slice(index).join(".");
-  if (base.length === 0 || base === sub) return;
-  const zone = entry.domain.toLowerCase();
-  const owner = String(entry.owner).toLowerCase();
-  if (subOwners.get(`${zone}/${base}`) !== owner) {
-    fail(`${file}: "${sub}" needs "${base}" in ${zone} claimed by the same owner first`);
+
+  const username = R.ownerUsername(entry);
+  if (username) {
+    if (!author.username) {
+      R.fail(`${file}: owner.username "${username}" cannot be checked because this run does not know the author`);
+    }
+    if (username !== author.username.toLowerCase()) {
+      R.fail(
+        `${file}: owner.username "${owner.username}" is not the account opening this pull request ` +
+          `("${author.username}"); add "id" to the owner object to match on the numeric account`,
+      );
+    }
+    return;
+  }
+
+  R.fail(
+    `${file}: this entry has only an email, so it cannot be tied to the account opening this pull request. ` +
+      `Add "username" or "id" to owner, or let a trusted author file it`,
+  );
+}
+
+function checkName(file, name, policy, ownerIsTrusted) {
+  const where = file;
+  const sub = name.subdomain;
+  const zone = name.zone;
+
+  if (!policy.zones.includes(zone)) {
+    R.fail(`${where}: "${zone}" is not a managed zone (${policy.zones.join(", ")})`);
+  }
+  if (sub !== sub.toLowerCase()) R.fail(`${where}: the subdomain must be lowercase`);
+  if (!R.validSubdomain(sub)) {
+    R.fail(`${where}: "${sub}" is not a valid subdomain (use "@", "*", "*.<labels>", or dot-separated labels)`);
+  }
+
+  const single = !sub.includes(".") && sub !== "@" && sub !== "*";
+  if (!single) return;
+
+  // Blocked means impersonation: a brand or a role the zone will never host.
+  // It holds for every author, the DNS administration included, because there
+  // is no legitimate reason to answer as paypal.is-a.ceo.
+  if (policy.blocked.has(sub)) {
+    R.fail(`${where}: "${sub}" is blocked by the registry and cannot be claimed under any zone`);
+  }
+
+  // Reserved means the DNS administration already points it somewhere, so it is
+  // not free. Those authors are the administration, so the rule is theirs.
+  const word = R.reservedWord(sub, policy);
+  if (word && !ownerIsTrusted) {
+    R.fail(
+      `${where}: "${sub}" is reserved, so it already answers for the registry${word === sub.toLowerCase() ? "" : ` (it reads as "${word}")`}. ` +
+        `Pick a personal handle instead`,
+    );
   }
 }
 
-function checkNonJsonClaims(problems) {
-  if (!fs.existsSync(DOMAINS_DIR)) return;
-  const subdirectories = [];
-  for (const name of fs.readdirSync(DOMAINS_DIR).sort()) {
-    if (name.startsWith(".")) continue;
-    const full = path.join(DOMAINS_DIR, name);
-    let stat;
-    try {
-      stat = fs.statSync(full);
-    } catch {
-      continue;
+function normalizeRecords(entry, sub, zone) {
+  const where = entry.file;
+  const raw = entry.body.records;
+  if (raw === undefined) return null;
+  if (!R.isPlainObject(raw)) R.fail(`${where}: "records" must be an object keyed by record type`);
+
+  for (const key of Object.keys(raw)) {
+    if (!R.RECORD_TYPES.includes(key)) {
+      R.fail(`${where}: records.${key} is not a supported type (${R.RECORD_TYPES.join(", ")})`);
     }
-    if (stat.isDirectory()) {
-      subdirectories.push(name);
-      continue;
+    if (Array.isArray(raw[key]) && raw[key].length === 0) R.fail(`${where}: records.${key} is empty; remove the key instead`);
+    if (Array.isArray(raw[key]) && raw[key].length > R.MAX_VALUES) {
+      R.fail(`${where}: records.${key} has ${raw[key].length} values, the limit is ${R.MAX_VALUES}`);
     }
-    if (!stat.isFile()) continue;
-    if (name.toLowerCase().endsWith(".json")) continue;
-    let looksLikeClaim = false;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(full, "utf8"));
-      looksLikeClaim = isPlainObject(parsed) && ("domain" in parsed || "subdomain" in parsed || "owner" in parsed);
-    } catch {
-      looksLikeClaim = false;
+  }
+
+  const out = {};
+  const list = (kind) => (Array.isArray(raw[kind]) ? raw[kind] : null);
+
+  if (raw.A !== undefined) {
+    if (!list("A")) R.fail(`${where}: records.A must be an array`);
+    out.A = raw.A.map((value) => {
+      if (!R.isPublicIPv4(value)) R.fail(`${where}: "${value}" is not a public IPv4 address`);
+      return value;
+    });
+  }
+  if (raw.AAAA !== undefined) {
+    if (!list("AAAA")) R.fail(`${where}: records.AAAA must be an array`);
+    out.AAAA = raw.AAAA.map((value) => {
+      if (!R.isPublicIPv6(value)) R.fail(`${where}: "${value}" is not a public IPv6 address`);
+      return value;
+    });
+  }
+  if (raw.CNAME !== undefined) {
+    const targets = Array.isArray(raw.CNAME) ? raw.CNAME : [raw.CNAME];
+    if (targets.length > 1) {
+      R.fail(`${where}: records.CNAME takes one target, because DNS forbids two CNAMEs on one name`);
     }
-    if (!looksLikeClaim) continue;
-    problems.push({
-      file: name,
-      message:
-        `${name}: this is a registry entry without a .json extension, so the validator ` +
-        `and the DNS config glob both skip it; rename it to "${name}.json"`,
+    const target = targets[0];
+    if (typeof target !== "string" || !R.validTarget(target)) {
+      R.fail(`${where}: "${target}" is not a valid public CNAME target`);
+    }
+    const plain = target.trim().toLowerCase().replace(/\.$/, "");
+    if (plain === zone || plain === R.fqdnOf(sub, zone)) {
+      R.fail(`${where}: CNAME target "${target}" cannot point at the name it sits on, or at the apex`);
+    }
+    out.CNAME = target;
+  }
+  if (raw.TXT !== undefined) {
+    if (!list("TXT")) R.fail(`${where}: records.TXT must be an array`);
+    out.TXT = raw.TXT.map((value) => {
+      if (typeof value !== "string" || value.length === 0) R.fail(`${where}: TXT values are non-empty strings`);
+      if (value.length > 255) R.fail(`${where}: TXT value is longer than 255 characters`);
+      // eslint-disable-next-line no-control-regex
+      if (/[\x00-\x1f\x7f]/.test(value)) R.fail(`${where}: TXT values cannot hold control characters`);
+      const proof = R.VERIFY_RE.exec(value.trim());
+      if (proof && R.fqdnOf(sub, zone) !== `_vercel.${proof[1].toLowerCase()}`) {
+        R.fail(
+          `${where}: this Vercel proof verifies "${proof[1]}", so it counts on "_vercel.${proof[1].toLowerCase()}" and nowhere else`,
+        );
+      }
+      return value;
+    });
+  }
+  if (raw.MX !== undefined) {
+    if (!list("MX")) R.fail(`${where}: records.MX must be an array`);
+    out.MX = raw.MX.map((mx) => {
+      if (!R.isPlainObject(mx)) R.fail(`${where}: MX entries look like { "priority": 10, "target": "mx.example.com" }`);
+      if (!Number.isInteger(mx.priority) || mx.priority < 0 || mx.priority > 65535) {
+        R.fail(`${where}: MX priority must be a whole number from 0 to 65535`);
+      }
+      if (!R.validTarget(mx.target)) R.fail(`${where}: MX target "${mx.target}" is not a public hostname`);
+      return { priority: mx.priority, target: mx.target };
+    });
+  }
+  if (raw.NS !== undefined) {
+    if (!list("NS")) R.fail(`${where}: records.NS must be an array`);
+    out.NS = raw.NS.map((value) => {
+      if (!R.validTarget(value)) R.fail(`${where}: "${value}" is not a public nameserver name`);
+      return value;
+    });
+  }
+  if (raw.SRV !== undefined) {
+    if (!list("SRV")) R.fail(`${where}: records.SRV must be an array`);
+    out.SRV = raw.SRV.map((srv) => {
+      const range = (n) => Number.isInteger(n) && n >= 0 && n <= 65535;
+      const ok = R.isPlainObject(srv) && range(srv.priority) && range(srv.weight) && range(srv.port) && R.validTarget(srv.target);
+      if (!ok) {
+        R.fail(`${where}: SRV entries look like { "priority": 0, "weight": 5, "port": 25565, "target": "mc.example.com" }, all numbers 0-65535`);
+      }
+      return srv;
+    });
+  }
+  if (raw.CAA !== undefined) {
+    if (!list("CAA")) R.fail(`${where}: records.CAA must be an array`);
+    out.CAA = raw.CAA.map((caa) => {
+      const ok = R.isPlainObject(caa) && (caa.flag === 0 || caa.flag === 128) &&
+        ["issue", "issuewild", "iodef"].includes(caa.tag) &&
+        typeof caa.value === "string" && caa.value.length > 0 && caa.value.length <= 255;
+      if (!ok) {
+        R.fail(`${where}: CAA entries look like { "flag": 0, "tag": "issue", "value": "letsencrypt.org" } (flag 0 or 128, tag issue|issuewild|iodef)`);
+      }
+      // eslint-disable-next-line no-control-regex
+      if (/[\x00-\x1f\x7f]/.test(caa.value)) R.fail(`${where}: CAA values cannot hold control characters`);
+      if (caa.tag !== "iodef" && /[/\s]/.test(caa.value)) {
+        R.fail(`${where}: a CAA "${caa.tag}" value is a bare domain like "letsencrypt.org", not a URL`);
+      }
+      return caa;
+    });
+  }
+  if (raw.PTR !== undefined) {
+    if (!list("PTR")) R.fail(`${where}: records.PTR must be an array`);
+    out.PTR = raw.PTR.map((value) => {
+      if (!R.validTarget(value)) R.fail(`${where}: "${value}" is not a public hostname`);
+      return value;
     });
   }
 
-  if (subdirectories.length > 0) {
-    problems.push({
-      file: null,
-      message:
-        `domains/ contains ${subdirectories.length === 1 ? "a subdirectory" : "subdirectories"} ` +
-        `(${subdirectories.slice(0, 5).map((d) => `"${d}"`).join(", ")}); registry entries are kept ` +
-        `flat in domains/ so every file is named <subdomain>.<zone>.json and checked before it reaches DNS`,
+  if (R.isApex(sub) && out.CNAME !== undefined) R.fail(`${where}: the apex cannot carry a CNAME; use A and AAAA`);
+  if (R.isApex(sub) && out.NS !== undefined) R.fail(`${where}: the apex cannot delegate with NS; that delegation belongs to Cloudflare`);
+
+  const exclusive = ["A", "AAAA", "MX", "NS", "SRV", "PTR"].filter((kind) => out[kind]);
+  if (out.CNAME !== undefined && exclusive.length > 0) {
+    R.fail(`${where}: a CNAME cannot share its name with ${exclusive.join(", ")}`);
+  }
+
+  for (const kind of Object.keys(out)) {
+    const values = Array.isArray(out[kind]) ? out[kind] : [out[kind]];
+    const keys = values.map((value) => {
+      if (typeof value === "string") return kind === "TXT" ? value : value.trim().toLowerCase().replace(/\.$/, "");
+      return JSON.stringify(value, Object.keys(value).sort());
     });
+    if (new Set(keys).size !== keys.length) R.fail(`${where}: records.${kind} repeats a value`);
   }
+
+  if (Object.keys(out).length === 0) R.fail(`${where}: records is empty; remove the key to get the GitHub Pages default`);
+  return out;
 }
 
-function checkMisplacedRootFiles() {
-  const knownRootConfigs = new Set([
-    "package.json",
-    "package-lock.json",
-    "creds.json",
-    "tsconfig.json",
-  ]);
+function validateEntry(filename, name, body, policy, author, actor, touched) {
+  const file = `domains/${filename}`;
+  const where = { file, body };
 
-  for (const rf of fs.readdirSync(ROOT)) {
-    if (!rf.endsWith(".json") || knownRootConfigs.has(rf)) continue;
-    const full = path.join(ROOT, rf);
-    // The read is the only part that may fail on a user-supplied file: a root
-    // JSON that does not parse is not this rule's business. The check below sits
-    // outside the catch so a match still throws, instead of being swallowed by
-    // the same handler that tolerates a bad file.
-    let looksLikeEntry = false;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(full, "utf8"));
-      looksLikeEntry = isPlainObject(parsed) && (parsed.domain || parsed.subdomain);
-    } catch {
-      looksLikeEntry = false;
-    }
-    if (looksLikeEntry || rf.split(".").length >= 3) {
-      fail(`${rf}: domain files must be placed in the domains/ directory, not in the repository root`);
+  for (const key of Object.keys(body)) {
+    if (!R.ENTRY_KEYS.has(key)) {
+      R.fail(`${file}: unknown key "${key}" (allowed: ${[...R.ENTRY_KEYS].join(", ")})`);
     }
   }
+
+  checkOwner(file, body, author, actor);
+  if (touched) checkClaimant(file, body, author, actor);
+  const ownerEntry = R.trustedBy(policy, { id: R.ownerOf(body)?.id, username: R.ownerUsername(body) });
+  checkName(file, name, policy, Boolean(ownerEntry));
+
+  if (body.repo !== undefined && !R.validRepo(body.repo)) {
+    R.fail(`${file}: "repo" must look like github.com/you/project or a full https URL`);
+  }
+  if (body.description !== undefined) {
+    if (typeof body.description !== "string") R.fail(`${file}: "description" must be a string`);
+    if (body.description.length > 200) R.fail(`${file}: "description" is longer than the 200 characters the site shows`);
+  }
+  if (body.proxied !== undefined && typeof body.proxied !== "boolean") {
+    R.fail(`${file}: "proxied" must be true or false`);
+  }
+
+  const sub = name.subdomain;
+  if (R.isZoneWide(sub) && !R.trustedBy(policy, { username: R.ownerUsername(body) })) {
+    R.fail(`${file}: "${sub}" answers for every name in the zone, so a trusted author holds it. Put your record one label deeper`);
+  }
+
+  return { file, sub, zone: name.zone, body, records: normalizeRecords(where, sub, name.zone) };
 }
 
-function snapshotState(seen, subOwners) {
-  return { seen: new Set(seen), subOwners: new Map(subOwners) };
-}
-
-function restoreState(seen, subOwners, snap) {
-  seen.clear();
-  snap.seen.forEach((v) => seen.add(v));
-  subOwners.clear();
-  snap.subOwners.forEach((v, k) => subOwners.set(k, v));
-}
-
-function main() {
+function checkBaseClaims(entries) {
   const problems = [];
-
-  try {
-    checkMisplacedRootFiles();
-  } catch (err) {
-    if (!isValidationError(err)) throw err;
-    problems.push({ file: null, message: err.message });
+  const owners = new Map();
+  for (const entry of entries) {
+    if (R.isZoneWide(entry.sub) || entry.sub.startsWith("*.") || R.isAuxiliary(entry.sub)) continue;
+    owners.set(`${entry.zone}/${entry.sub}`, R.ownerKey(entry.body));
   }
 
-  checkNonJsonClaims(problems);
-
-  let meta;
-  try {
-    meta = loadMeta();
-    checkMetaPolicy(meta, baseMetaForPr() || loadBaseMeta());
-  } catch (err) {
-    if (!isValidationError(err)) throw err;
-    problems.push({ file: null, message: err.message });
-  }
-
-  if (!meta) return report(problems, [], []);
-  if (!fs.existsSync(DOMAINS_DIR)) {
-    problems.push({ file: null, message: "domains/ directory not found" });
-    return report(problems, [], []);
-  }
-
-  const files = fs.readdirSync(DOMAINS_DIR)
-    .filter((f) => f.endsWith(".json") && !RESERVED_FILENAMES.has(f))
-    .sort();
-
-  const seen = new Set();
-  const subOwners = new Map();
-  const entries = [];
-  const warnings = [];
-
-  // Pass 1: parse and validate every file. Wildcard base checks need the
-  // full owner map, so they run afterwards.
-  for (const file of files) {
-    const full = path.join(DOMAINS_DIR, file);
-    const snap = snapshotState(seen, subOwners);
-
-    let lstats;
-    try {
-      lstats = fs.lstatSync(full);
-    } catch {
-      problems.push({ file, message: `${file}: could not be read` });
-      continue;
-    }
-    if (!lstats.isFile()) {
-      problems.push({
-        file,
-        message:
-          `${file}: registry entries must be regular files; a symlink or device is not ` +
-          `accepted, because it reads a path this repository does not control`,
-      });
-      continue;
-    }
-
-    let raw;
-    try {
-      raw = fs.readFileSync(full, "utf8");
-    } catch {
-      problems.push({ file, message: `${file}: could not be read` });
-      continue;
-    }
-    if (raw.length > MAX_FILE_BYTES) {
-      problems.push({ file, message: `${file}: file is larger than ${MAX_FILE_BYTES} bytes` });
-      continue;
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      const position = /at position (\d+)/.exec(err.message);
-      const detail = position ? ` at position ${position[1]}` : "";
-      problems.push({ file, message: `${file}: invalid JSON${detail}; check for a missing comma, a trailing comma or a smart quote` });
-      continue;
-    }
-    const preflight = preflightEntry(file, parsed, meta);
-    if (preflight.length > 0) {
-      problems.push(...preflight);
-      continue;
-    }
-    warnings.push(...advisoryCheck(file, parsed, meta));
-    try {
-      validateEntry(file, parsed, meta, seen, subOwners);
-    } catch (err) {
-      if (!isValidationError(err)) throw err;
-      restoreState(seen, subOwners, snap);
-      problems.push({ file, message: err.message });
-      continue;
-    }
-    entries.push({ file, entry: parsed });
-    if (!JSON_MODE) console.log(`validate: ok, ${file}`);
-  }
-
-  // Pass 2: every wildcard and every underscore-prefixed name must sit on top
-  // of the owner's own claim.
-  for (const { file, entry } of entries) {
-    try {
-      checkOwnedBase(file, entry, subOwners);
-    } catch (err) {
-      if (!isValidationError(err)) throw err;
-      problems.push({ file, message: err.message });
+  for (const entry of entries) {
+    if (!entry.sub.includes(".")) continue;
+    const labels = entry.sub.split(".");
+    const serviceOnly = entry.records && entry.records.SRV && !["A", "AAAA", "CNAME", "TXT", "MX", "NS", "PTR"].some((k) => entry.records[k]);
+    let index = labels[0] === "*" ? 1 : 0;
+    if (labels[0] !== "*" && serviceOnly) continue;
+    while (index < labels.length - 1 && labels[index].startsWith("_")) index += 1;
+    const base = labels.slice(index).join(".");
+    if (!base || base === entry.sub) continue;
+    if (owners.get(`${entry.zone}/${base}`) !== R.ownerKey(entry.body)) {
+      problems.push({ file: entry.file, message: `${entry.file}: "${entry.sub}" needs "${base}" in ${entry.zone} claimed by the same owner first` });
     }
   }
-
-  problems.push(...checkSharedTargets(entries));
-
-  report(problems, entries.map((e) => e.file), warnings);
+  return problems;
 }
 
 function checkSharedTargets(entries) {
   const problems = [];
-  const byTarget = new Map();
-  for (const { file, entry } of entries) {
-    const records = isPlainObject(entry.records) ? entry.records : {};
-    const zone = String(entry.domain).toLowerCase();
-    const owner = normalizeOwner(entry.owner);
-    for (const kind of ["CNAME", "A", "AAAA"]) {
-      const raw = records[kind];
-      const values = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
-      for (const value of values) {
-        if (typeof value !== "string") continue;
-        const target = value.trim().toLowerCase().replace(/\.$/, "");
-        if (target.length === 0) continue;
-        // Two entities are only the same site inside one zone, so the key keeps
-        // the zone; the same A record in two zones is two independent hosts.
-        const key = `${zone}:${kind}:${target}`;
-        const name = entry.subdomain === "@" ? zone : `${entry.subdomain}.${zone}`;
-        const sharing = byTarget.get(key);
-        if (sharing) {
-          if (sharing.owner !== owner) sharing.entries.push({ file, name, owner });
-          continue;
-        }
-        byTarget.set(key, { owner, zone, kind, target, name, entries: [{ file, name, owner }] });
+  const seen = new Map();
+
+  for (const entry of entries) {
+    if (!entry.records) continue;
+    const targets = [];
+    if (entry.records.CNAME) targets.push(["CNAME", entry.records.CNAME]);
+    for (const ip of entry.records.A || []) targets.push(["A", ip]);
+    for (const ip of entry.records.AAAA || []) targets.push(["AAAA", ip]);
+
+    for (const [kind, value] of targets) {
+      const key = `${entry.zone}/${kind}/${String(value).toLowerCase().replace(/\.$/, "")}`;
+      const held = seen.get(key);
+      if (!held) {
+        seen.set(key, entry);
+        continue;
       }
-    }
-  }
-  for (const sharing of byTarget.values()) {
-    if (sharing.entries.length < 2) continue;
-    for (const { file, name } of sharing.entries) {
-      const others = sharing.entries
-        .filter((e) => e.name !== name)
-        .map((e) => (e.owner === normalizeOwner(sharing.entries[0].owner) ? e.name : `${e.name} (@${e.owner})`));
+      if (R.ownerKey(held.body) === R.ownerKey(entry.body)) continue;
       problems.push({
-        file,
+        file: entry.file,
         message:
-          `${file}: records.${sharing.kind} "${sharing.target}" is also used by ` +
-          `${others.join(", ")} for a different owner; two names cannot serve one site, ` +
-          `so point this at your own host`,
+          `${entry.file}: records.${kind} "${value}" is also used by ${held.sub}.${held.zone} under a different owner. ` +
+          `Two names cannot serve one site, so point this at your own host`,
       });
     }
   }
   return problems;
 }
 
-function report(problems, verified, warnings = []) {
-  if (JSON_MODE) {
-    const payload = { ok: problems.length === 0, verified, problems, warnings };
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-  } else {
-    for (const problem of problems) console.error(`validate: ${problem.message}`);
-    for (const warning of warnings) console.error(`validate: warning: ${warning.message}`);
-    if (problems.length > 0) {
-      console.error(`validate: ${problems.length} problem(s) found`);
-    } else if (verified.length === 0) {
-      console.log("validate: registry is empty, nothing to validate");
-    } else {
-      console.log(`validate: ${verified.length} entr(y/ies) verified`);
+function checkScope(problems, files, actor, author, policy) {
+  if (!files) return;
+  const push = (message, file = null) => problems.push({ file, message });
+  const touches = (file, prefixes) => prefixes.some((prefix) => file === prefix || file.startsWith(prefix));
+  const claims = files.filter((f) => f.path.startsWith("domains/"));
+
+  if (!author) {
+    if (claims.length > CLAIM_LIMIT) {
+      push(`one pull request changes ${claims.length} files under domains/; a claim is one entry, plus its _vercel sidecar`);
     }
+    return;
+  }
+
+  if (!actor) {
+    for (const { path: file } of files) {
+      if (file.startsWith("domains/")) continue;
+      if (DOCS.has(file) || file.endsWith(".md")) continue;
+      if (touches(file, POLICY_PATHS) || touches(file, CODE_PATHS) || touches(file, CI_PATHS) || file === "CODEOWNERS") {
+        push(`${file}: only a trusted author can change this. A claim pull request touches its own domains/<name>.<zone>.json and nothing else`);
+      } else {
+        push(`${file}: a claim pull request adds one file under domains/, or fixes a typo in the documentation`);
+      }
+    }
+    if (claims.length > CLAIM_LIMIT) {
+      push(`one pull request changes ${claims.length} files under domains/; a claim is one entry, plus its _vercel sidecar`);
+    }
+  } else if (!actor.admin) {
+    for (const { path: file } of files) {
+      if (file === "registry/trusted.json") push("registry/trusted.json: only an admin can change the trusted list");
+    }
+  }
+
+  if (actor) return;
+
+  const holds = (entryBody) => {
+    const owner = R.ownerOf(entryBody);
+    if (!owner) return null;
+    if (Number.isInteger(owner.id) && author.id) return owner.id === author.id;
+    const username = R.ownerUsername(entryBody);
+    if (username && author.username) return username === author.username.toLowerCase();
+    // Nothing comparable, so this rule cannot clear the author either.
+    return null;
+  };
+
+  for (const { status, path: file } of claims) {
+    if (!file.endsWith(".json")) continue;
+    const previous = baseFile(file);
+    if (status === "D") {
+      if (previous === null) continue;
+      let before;
+      try {
+        before = JSON.parse(previous);
+      } catch {
+        continue;
+      }
+      if (holds(before) === false) {
+        push(`${file}: this name belongs to "${R.ownerLabel(before)}"; releasing it is their call or a trusted author's`);
+      }
+      continue;
+    }
+    if (previous === null) continue;
+
+    let before;
+    try {
+      before = JSON.parse(previous);
+    } catch {
+      continue;
+    }
+    if (holds(before) === false) {
+      push(`${file}: this entry belongs to "${R.ownerLabel(before)}", so only they or a trusted author can change it`);
+      continue;
+    }
+    if (!fs.existsSync(path.join(R.ROOT, file))) continue;
+
+    let after;
+    try {
+      after = JSON.parse(fs.readFileSync(path.join(R.ROOT, file), "utf8"));
+    } catch {
+      continue;
+    }
+    const wasKey = R.ownerKey(before);
+    const nowKey = R.ownerKey(after);
+    if (wasKey && nowKey && wasKey !== nowKey) {
+      push(`${file}: owner moves from "${R.ownerLabel(before)}" to "${R.ownerLabel(after)}"; a claim does not change hands through a pull request`);
+    }
+  }
+}
+
+function report(problems, verified, warnings) {
+  if (JSON_MODE) {
+    process.stdout.write(`${JSON.stringify({ ok: problems.length === 0, verified, problems, warnings }, null, 2)}\n`);
+  } else {
+    for (const warning of warnings) console.error(`validate: warning: ${warning.message}`);
+    for (const problem of problems) console.error(`validate: ${problem.message}`);
+    if (problems.length === 0) console.log(`validate: ${verified} entr${verified === 1 ? "y" : "ies"} verified`);
   }
   if (problems.length > 0) process.exit(1);
 }
 
-main();
+function main() {
+  const problems = [];
+  const warnings = [];
+  let policy;
+
+  try {
+    policy = R.loadPolicy();
+  } catch (err) {
+    if (!(err instanceof R.RegistryError)) throw err;
+    policy = null;
+    problems.push({ file: null, message: err.message });
+  }
+
+  checkLayout(problems);
+
+  const author = R.currentAuthor();
+  const actor = policy ? R.trustedBy(policy, author) : null;
+  const changed = changedFiles();
+  const touched = changed === null ? null : new Set(changed.map((entry) => entry.path));
+
+  if (policy) {
+    try {
+      checkPolicyChange(problems, policy, basePolicy(), actor, author);
+    } catch (err) {
+      if (!(err instanceof R.RegistryError)) throw err;
+      problems.push({ file: null, message: err.message });
+    }
+  }
+
+  const entries = [];
+  if (policy && fs.existsSync(R.DOMAINS_DIR)) {
+    for (const { filename, full } of R.loadClaims()) {
+      const name = R.parseClaimFile(filename, policy.zones);
+      if (!name) {
+        problems.push({
+          file: `domains/${filename}`,
+          message: `domains/${filename}: the name must be <subdomain>.<zone>.json, for example jane.${policy.zones[0]}.json or @.${policy.zones[0]}.json`,
+        });
+        continue;
+      }
+
+      const stat = fs.lstatSync(full);
+      if (!stat.isFile()) {
+        problems.push({ file: `domains/${filename}`, message: `domains/${filename}: entries are regular files, never a symlink` });
+        continue;
+      }
+      if (stat.size > R.MAX_FILE_BYTES) {
+        problems.push({ file: `domains/${filename}`, message: `domains/${filename}: file is larger than ${R.MAX_FILE_BYTES} bytes` });
+        continue;
+      }
+      if (filename !== R.claimFile(name.subdomain, name.zone)) {
+        problems.push({ file: `domains/${filename}`, message: `domains/${filename}: the filename does not round-trip to the same name` });
+        continue;
+      }
+
+      let body;
+      try {
+        body = R.readJson(full);
+      } catch (err) {
+        if (!(err instanceof R.RegistryError)) throw err;
+        problems.push({ file: `domains/${filename}`, message: err.message });
+        continue;
+      }
+      if (!R.isPlainObject(body)) {
+        problems.push({ file: `domains/${filename}`, message: `domains/${filename}: an entry is one JSON object, not an array or a bare value` });
+        continue;
+      }
+
+      try {
+        // With no readable change set there is nothing to match against, so the
+        // claimant check steps aside rather than guessing.
+        const isTouched = touched !== null && touched.has(`domains/${filename}`);
+        entries.push(validateEntry(filename, name, body, policy, author, actor, isTouched));
+      } catch (err) {
+        if (!(err instanceof R.RegistryError)) throw err;
+        problems.push({ file: `domains/${filename}`, message: err.message });
+      }
+    }
+  }
+
+  const seen = new Map();
+  for (const entry of entries) {
+    const key = `${entry.zone}/${entry.sub}`;
+    if (seen.has(key)) {
+      problems.push({ file: entry.file, message: `${entry.file}: "${entry.sub}" is already claimed in ${entry.zone}` });
+    }
+    seen.set(key, entry);
+  }
+
+  problems.push(...checkBaseClaims(entries));
+  problems.push(...checkSharedTargets(entries));
+
+  try {
+    checkScope(problems, changedFiles(), actor, author);
+  } catch (err) {
+    if (!(err instanceof R.RegistryError)) throw err;
+    problems.push({ file: null, message: err.message });
+  }
+
+  report(problems, entries.length, warnings);
+}
+
+if (require.main === module) main();
+
+module.exports = { validateEntry, checkScope, checkBaseClaims, checkSharedTargets, normalizeRecords };
