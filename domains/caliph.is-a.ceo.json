@@ -1,0 +1,10 @@
+{
+  "$schema": "./SCHEMA.json",
+  "domain": "is-a.ceo",
+  "subdomain": "caliph",
+  "owner": "cabrata",
+  "description": "domain tambahan untuk portofolio saya",
+  "records": {
+    "CNAME": "server.caliph.dev"
+  }
+}
