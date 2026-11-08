@@ -14,11 +14,11 @@
 
 <p align="center"><strong>is-a.ceo</strong> gives you a free subdomain for the portfolio, the API, or the Minecraft server you keep restarting.</p>
 
-<p align="center">📕 <a href="https://docs.is-a.ceo">Documentation</a> &bull; 🔍 <a href="https://is-a.ceo/check">Check a name</a> &bull; 📊 <a href="https://is-a.ceo/status">Status</a> &bull; 📜 <a href="https://is-a.ceo/terms">Terms</a></p>
+<p align="center"><a href="https://docs.is-a.ceo">Documentation</a> &bull; <a href="https://is-a.ceo/check">Check a name</a> &bull; <a href="https://is-a.ceo/status">Status</a> &bull; <a href="https://is-a.ceo/terms">Terms</a></p>
 
 ---
 
-## ✏️ Register
+## Register
 
 1. Check the name at [is-a.ceo/check](https://is-a.ceo/check). It reads the same list the validator does.
 2. [Fork](https://github.com/HisokaLabs/open-subdomains/fork) the repository.
@@ -44,11 +44,11 @@ That is the whole file. No `domain`, no `subdomain`, no `records`: leaving `reco
 
 Keep it personal and non-commercial, and put a finished site behind it before you open the pull request. A parked page or a placeholder is refused. The rest is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## ⛔ Report abuse
+## Report abuse
 
 Email [contact@hisoka.net](mailto:contact@hisoka.net) with the subject `abuse: <hostname>`, the full hostname, what you saw, and whatever evidence you have. Reports in English or Indonesian are both fine. What happens next is in the [abuse policy](https://is-a.ceo/abuse).
 
-## 🛠 How it works
+## How it works
 
 One JSON file per claim in `domains/`, policy in `registry/`, and [DNSControl](https://github.com/StackExchange/dnscontrol) reads both at push time through [HisokaLabs/dnscontrol-actions](https://github.com/HisokaLabs/dnscontrol-actions). Nothing is generated ahead of time, so the file you see in the pull request is the record that gets pushed.
 
