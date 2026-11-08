@@ -1,9 +1,9 @@
-
 {
-  "$schema": "./SCHEMA.json",
-  "domain": "is-a.ceo",
-  "subdomain": "shinra",
-  "owner": "SeventID",
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "SeventID",
+    "id": 304175680
+  },
   "repo": "github.com/SeventID/Shinra",
   "description": "Personal portfolio, projects, and services",
   "proxied": true,

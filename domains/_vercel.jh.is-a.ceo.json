@@ -1,10 +1,14 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "_vercel.jh",
-  "owner": "FionyBot",
-  "description": "Vercel ownership proof for jh.is-a.ceo. Temporary: removed once the project reads Valid Configuration.",
-  "records": {
-    "TXT": ["vc-domain-verify=jh.is-a.ceo,c26ed8dd5d74d95219e8"]
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "FionyBot",
+    "id": 322181939
   },
-  "proxied": false
+  "description": "Vercel ownership proof for jh.is-a.ceo. Temporary: removed once the project reads Valid Configuration.",
+  "proxied": false,
+  "records": {
+    "TXT": [
+      "vc-domain-verify=jh.is-a.ceo,c26ed8dd5d74d95219e8"
+    ]
+  }
 }

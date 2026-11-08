@@ -1,11 +1,15 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "dikaardnt",
-  "owner": "DikaArdnt",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "DikaArdnt",
+    "id": 88322331
+  },
   "repo": "github.com/DikaArdnt/dikaardnt.is-a.ceo",
   "description": "Subdomain for DikaArdnt's personal projects and portfolio.",
+  "proxied": false,
   "records": {
-    "CNAME": ["dikaardnt.netlify.app"]
+    "CNAME": [
+      "dikaardnt.netlify.app"
+    ]
   }
 }

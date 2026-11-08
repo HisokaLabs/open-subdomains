@@ -1,8 +1,9 @@
 {
-  "$schema": "./SCHEMA.json",
-  "domain": "is-a.ceo",
-  "subdomain": "caliph",
-  "owner": "cabrata",
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "cabrata",
+    "id": 166631827
+  },
   "description": "domain tambahan untuk portofolio saya",
   "records": {
     "CNAME": "server.caliph.dev"

@@ -1,11 +1,15 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "jh",
-  "owner": "FionyBot",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "FionyBot",
+    "id": 322181939
+  },
   "repo": "github.com/FionyBot",
   "description": "Iseng-iseng jadi si i o",
+  "proxied": false,
   "records": {
-    "CNAME": ["9a2e3da222f34c06.vercel-dns-017.com"]
+    "CNAME": [
+      "9a2e3da222f34c06.vercel-dns-017.com"
+    ]
   }
 }

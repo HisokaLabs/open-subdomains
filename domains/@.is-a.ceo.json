@@ -1,12 +1,23 @@
 {
-  "$schema": "./SCHEMA.json",
-  "domain": "is-a.ceo",
-  "subdomain": "@",
-  "owner": "HisokaLabs",
-  "description": "Apex of the zone, serving the is-a.ceo website on GitHub Pages.",
-  "records": {
-    "A": ["185.199.108.153", "185.199.109.153", "185.199.110.153", "185.199.111.153"],
-    "AAAA": ["2606:50c1:8000::153", "2606:50c1:8001::153", "2606:50c1:8002::153", "2606:50c1:8003::153"]
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "HisokaLabs",
+    "id": 103969998
   },
-  "proxied": true
+  "description": "Apex of the zone, serving the is-a.ceo website on GitHub Pages.",
+  "proxied": true,
+  "records": {
+    "A": [
+      "185.199.108.153",
+      "185.199.109.153",
+      "185.199.110.153",
+      "185.199.111.153"
+    ],
+    "AAAA": [
+      "2606:50c1:8000::153",
+      "2606:50c1:8001::153",
+      "2606:50c1:8002::153",
+      "2606:50c1:8003::153"
+    ]
+  }
 }

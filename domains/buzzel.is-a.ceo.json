@@ -1,9 +1,13 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "buzzel",
-  "owner": "fasoft9-star",
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "fasoft9-star",
+    "id": 245694692
+  },
   "description": "blog",
   "records": {
-    "CNAME": ["bujel.duckdns.org"]
+    "CNAME": [
+      "bujel.duckdns.org"
+    ]
   }
 }

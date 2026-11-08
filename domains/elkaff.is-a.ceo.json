@@ -1,11 +1,15 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "elkaff",
-  "owner": "elkhaff",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "elkhaff",
+    "id": 167302368
+  },
   "repo": "github.com/elkhaff",
   "description": "Gwehj CEO",
+  "proxied": false,
   "records": {
-    "CNAME": ["62873a1b0171cbc0.vercel-dns-017.com"]
+    "CNAME": [
+      "62873a1b0171cbc0.vercel-dns-017.com"
+    ]
   }
 }

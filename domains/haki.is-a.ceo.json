@@ -1,9 +1,11 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "haki",
-  "owner": "shellhaki",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "shellhaki",
+    "id": 165590443
+  },
   "description": "Haki's personal portfolio",
+  "proxied": false,
   "records": {
     "CNAME": "3d8e890ae6ab2d84.vercel-dns-017.com."
   }

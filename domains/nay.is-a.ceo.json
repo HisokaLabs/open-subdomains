@@ -1,11 +1,15 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "nay",
-  "owner": "soudayonee",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "soudayonee",
+    "id": 145576625
+  },
   "repo": "github.com/soudayonee",
   "description": "NAY Is A CEO",
+  "proxied": false,
   "records": {
-    "CNAME": ["8b2220d546ccbf0e.vercel-dns-017.com"]
+    "CNAME": [
+      "8b2220d546ccbf0e.vercel-dns-017.com"
+    ]
   }
 }

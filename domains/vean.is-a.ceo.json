@@ -1,11 +1,15 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "vean",
-  "owner": "veanyxz",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "veanyxz",
+    "id": 50613879
+  },
   "repo": "github.com/veanyxz/vean.is-a.ceo",
   "description": "Subdomain for Vean's personal projects and portfolio.",
+  "proxied": false,
   "records": {
-    "CNAME": ["vean-portofolio.netlify.app"]
+    "CNAME": [
+      "vean-portofolio.netlify.app"
+    ]
   }
 }

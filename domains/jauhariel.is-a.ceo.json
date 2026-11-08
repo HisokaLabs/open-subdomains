@@ -1,11 +1,15 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "jauhariel",
-  "owner": "Jauhariel",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "Jauhariel",
+    "id": 92896736
+  },
   "repo": "github.com/jauhariel",
   "description": "aku CEO",
+  "proxied": false,
   "records": {
-    "CNAME": ["5a85c0c4cb920e52.vercel-dns-017.com"]
+    "CNAME": [
+      "5a85c0c4cb920e52.vercel-dns-017.com"
+    ]
   }
 }

@@ -1,7 +1,9 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "_vercel.elkaff",
-  "owner": "elkhaff",
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "elkhaff",
+    "id": 167302368
+  },
   "description": "Gwehj adalah CEO kayaknya",
   "records": {
     "TXT": [

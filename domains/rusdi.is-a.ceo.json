@@ -1,11 +1,15 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "rusdi",
-  "owner": "RusdiEneri",
-  "proxied": false,
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "RusdiEneri",
+    "id": 80238228
+  },
   "repo": "github.com/RusdiEneri/open-subdomains",
   "description": "Subdomain for Rusdi's personal projects and portfolio.",
+  "proxied": false,
   "records": {
-    "CNAME": ["cbfb4912d192b465.vercel-dns-017.com"]
+    "CNAME": [
+      "cbfb4912d192b465.vercel-dns-017.com"
+    ]
   }
 }

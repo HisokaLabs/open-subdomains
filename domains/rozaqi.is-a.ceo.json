@@ -1,8 +1,9 @@
 {
-  "$schema": "./SCHEMA.json",
-  "domain": "is-a.ceo",
-  "subdomain": "rozaqi",
-  "owner": "alfathrzqii",
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "alfathrzqii",
+    "id": 133376453
+  },
   "records": {
     "A": [
       "129.221.146.240"

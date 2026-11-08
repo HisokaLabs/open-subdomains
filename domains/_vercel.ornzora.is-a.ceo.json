@@ -1,7 +1,9 @@
 {
-  "domain": "is-a.ceo",
-  "subdomain": "_vercel.ornzora",
-  "owner": "Ornzora",
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "Ornzora",
+    "id": 314416864
+  },
   "description": "A little piece of me",
   "records": {
     "TXT": [
