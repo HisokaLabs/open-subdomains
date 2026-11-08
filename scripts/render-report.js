@@ -23,7 +23,6 @@ const FIELD_HINTS = [
   { test: /cannot coexist with/, key: "cname" },
   { test: /without a \.json extension/, key: "extension" },
   { test: /invalid JSON/, key: "json" },
-  { test: /already has .* one subdomain per person/, key: "quota" },
   { test: /is reserved by the registry|is blocked by the registry/, key: "reserved" },
   { test: /is a zone-wide name, so maintainers hold it/, key: "zone-wide" },
   { test: /keeps those names unclaimed/, key: "reserved-word" },
@@ -88,8 +87,6 @@ const NOTES = {
     "A registry file that does not end in `.json` is invisible to the validator and to `dnsconfig.js`, so the name is never pushed.",
   cname:
     "A `CNAME` cannot share its name with `A`, `AAAA`, `MX`, `NS`, `SRV`, or `PTR`. Use `A`/`AAAA` against your own IPs, or point the CNAME at the host that terminates the traffic.",
-  quota:
-    "One subdomain per person per zone. Close this PR if you already hold one, or pick a different zone.",
   reserved:
     "Reserved and blocked labels are never granted. Anything that looks like impersonation or phishing is blocked outright.",
   "zone-wide":

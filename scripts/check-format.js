@@ -16,7 +16,7 @@ const CODE_PATHS = ["scripts/", "test/", "dnsconfig.js", "package.json", "packag
 /** Directories only a maintainer may touch. */
 const MAINTAINER_PATHS = ["domains/_meta.json", "domains/SCHEMA.json", ".github/", "CODEOWNERS"];
 /** Files whose change is always allowed, whoever opens the PR. */
-const DOC_PATHS = ["README.md", "CONTRIBUTING.md", "LICENSE", ".gitignore", ".gitattributes"];
+const DOC_PATHS = ["README.md", "CONTRIBUTING.md", "AGENTS.md", "LICENSE", ".gitignore", ".gitattributes"];
 
 const MAX_FILES_PER_CLAIM_PR = 4;
 

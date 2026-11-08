@@ -206,14 +206,12 @@ test("an invalid JSON error does not echo the file contents", () => {
   assert.doesNotMatch(out, /sk_live_51H8xQ2KZ9/);
 });
 
-test("an owner written two ways counts as one claim", () => {
-  rejects(
-    {
-      "one.is-a.ceo.json": labelled("one", { owner: "same" }),
-      "two.is-a.ceo.json": labelled("two", { owner: "@Same" }),
-    },
-    /already has one\.is-a\.ceo/,
-  );
+test("an owner may hold more than one name, however the handle is written", () => {
+  const files = {
+    "one.is-a.ceo.json": labelled("one", { owner: "same" }),
+    "two.is-a.ceo.json": labelled("two", { owner: "@Same" }),
+  };
+  assert.equal(accepts(files).code, 0);
 });
 
 test("a control character in owner is refused", () => {
@@ -484,6 +482,14 @@ test("a contributor deleting a claim is refused", () => {
 
 test("the documented claim template passes the shape check", () => {
   const problems = checkFormat([{ status: "A", path: "domains/_example.json" }], { isMaintainer: false });
+  assert.deepEqual(problems, []);
+});
+
+test("AGENTS.md is documentation, not a file a claim PR has to split out", () => {
+  // A contributor running an AI coding agent gets AGENTS.md updated alongside
+  // their claim far more often than README.md, and the shape check would have
+  // refused that PR for touching a file outside domains/.
+  const problems = checkFormat([{ status: "A", path: "AGENTS.md" }], { isMaintainer: false });
   assert.deepEqual(problems, []);
 });
 

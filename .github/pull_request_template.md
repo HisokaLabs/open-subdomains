@@ -3,9 +3,9 @@
 <!-- Change each checkbox to [x] to mark it completed. -->
 
 - [ ] I agree to the [Terms of Service](https://is-a.ceo/terms).
-- [ ] I have verified that my site is reachable at the URL I provided.
-- [ ] `owner` is my own GitHub username, and `email` (optional) is an address I actually read.
-- [ ] I claim only one subdomain per person per zone.
+- [ ] This name is for a personal or non-commercial site. I am not selling anything with it, not running a business on it, and not holding it for resale.
+- [ ] `owner` is my own GitHub username, and I have given enough contact detail in `owner` or `email` for a maintainer to reach me.
+- [ ] My site is reachable and finished at the URL below, not a placeholder or an empty page.
 - [ ] `npm run verify` passes locally.
 
 # Website Preview

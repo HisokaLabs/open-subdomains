@@ -1,0 +1,11 @@
+{
+  "$schema": "./SCHEMA.json",
+  "domain": "is-a.ceo",
+  "subdomain": "docs",
+  "owner": "HisokaLabs",
+  "description": "Documentation for the registry, built with Astro Starlight and published from HisokaLabs/docs.is-a.ceo on GitHub Pages.",
+  "records": {
+    "CNAME": "hisokalabs.github.io"
+  },
+  "proxied": true
+}

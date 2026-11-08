@@ -226,23 +226,22 @@ test("reserved and blocked labels are rejected", () => {
   rejects({ "paypal.is-a.ceo.json": labelled("paypal") }, /blocked by the registry/);
 });
 
-test("one subdomain per owner per zone", () => {
-  rejects(
-    {
-      "one.is-a.ceo.json": labelled("one", { owner: "same" }),
-      "two.is-a.ceo.json": labelled("two", { owner: "same" }),
-    },
-    /already has one\.is-a\.ceo/,
-  );
+test("one owner may hold several names in the same zone", () => {
+  const files = {
+    "one.is-a.ceo.json": labelled("one", { owner: "same" }),
+    "two.is-a.ceo.json": labelled("two", { owner: "same" }),
+    "three.is-a.ceo.json": labelled("three", { owner: "same" }),
+  };
+  assert.equal(accepts(files).code, 0);
 });
 
-test("a trailing space in owner does not dodge the quota", () => {
-  rejects(
-    {
+test("a trailing space in owner does not create a second owner", () => {
+  assert.equal(
+    accepts({
       "one.is-a.ceo.json": labelled("one", { owner: "same" }),
       "two.is-a.ceo.json": labelled("two", { owner: "same " }),
-    },
-    /already has/,
+    }).code,
+    0,
   );
 });
 
@@ -292,7 +291,7 @@ test("a zone-root underscore name is maintainer-only", () => {
   assert.equal(accepts({ "_dmarc.is-a.ceo.json": held }).code, 0);
 });
 
-test("a zone-wide record does not consume its holder's quota", () => {
+test("a zone-wide record and a plain name can share one owner", () => {
   const files = {
     "@.is-a.ceo.json": APEX,
     "www.is-a.ceo.json": labelled("www", { owner: "HisokaLabs", records: { CNAME: ["hisokalabs.github.io"] } }),

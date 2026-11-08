@@ -428,7 +428,7 @@ function checkMetaPolicy(meta, baseMeta) {
   }
 }
 
-function validateEntry(file, entry, meta, seen, claims, subOwners) {
+function validateEntry(file, entry, meta, seen, subOwners) {
   const where = file;
 
   if (!isPlainObject(entry)) fail(`${where}: entry must be a single JSON object (one entry per file)`);
@@ -517,11 +517,6 @@ function validateEntry(file, entry, meta, seen, claims, subOwners) {
 
   const auxiliary = sub.includes(".") && sub.split(".")[0].startsWith("_");
   if (!zoneWide && !sub.startsWith("*.") && !auxiliary) {
-    const claimKey = `${zone}/${ownerKey}`;
-    if (claims.has(claimKey)) {
-      fail(`${where}: owner "${owner}" already has ${claims.get(claimKey)} in ${zone}, one subdomain per person`);
-    }
-    claims.set(claimKey, `${sub}.${zone}`);
     subOwners.set(`${zone}/${sub}`, ownerKey);
   }
 
@@ -822,15 +817,13 @@ function checkMisplacedRootFiles() {
   }
 }
 
-function snapshotState(seen, claims, subOwners) {
-  return { seen: new Set(seen), claims: new Map(claims), subOwners: new Map(subOwners) };
+function snapshotState(seen, subOwners) {
+  return { seen: new Set(seen), subOwners: new Map(subOwners) };
 }
 
-function restoreState(seen, claims, subOwners, snap) {
+function restoreState(seen, subOwners, snap) {
   seen.clear();
   snap.seen.forEach((v) => seen.add(v));
-  claims.clear();
-  snap.claims.forEach((v, k) => claims.set(k, v));
   subOwners.clear();
   snap.subOwners.forEach((v, k) => subOwners.set(k, v));
 }
@@ -867,16 +860,15 @@ function main() {
     .sort();
 
   const seen = new Set();
-  const claims = new Map();
   const subOwners = new Map();
   const entries = [];
   const warnings = [];
 
   // Pass 1: parse and validate every file. Wildcard base checks need the
-  // full claim map, so they run afterwards.
+  // full owner map, so they run afterwards.
   for (const file of files) {
     const full = path.join(DOMAINS_DIR, file);
-    const snap = snapshotState(seen, claims, subOwners);
+    const snap = snapshotState(seen, subOwners);
 
     let lstats;
     try {
@@ -923,10 +915,10 @@ function main() {
     }
     warnings.push(...advisoryCheck(file, parsed, meta));
     try {
-      validateEntry(file, parsed, meta, seen, claims, subOwners);
+      validateEntry(file, parsed, meta, seen, subOwners);
     } catch (err) {
       if (!isValidationError(err)) throw err;
-      restoreState(seen, claims, subOwners, snap);
+      restoreState(seen, subOwners, snap);
       problems.push({ file, message: err.message });
       continue;
     }
