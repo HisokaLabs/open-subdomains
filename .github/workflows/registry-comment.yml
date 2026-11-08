@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   report:
-    name: Explain what the registry check needs
+    name: Explain what the check needs
     if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
@@ -28,17 +28,16 @@ jobs:
         with:
           node-version: '24'
 
+      # This job holds a write token, so no code from the fork runs in it. Only
+      # the claim files are copied in, and every policy file stays at the base
+      # commit, which means a fork cannot loosen the rule that judges it.
       - name: Take the pull request's entries, keep the registry's own rules
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git fetch --no-tags --depth=1 origin "pull/${PR_NUMBER}/head:prhead"
-          # Only regular .json files are copied, so a symlinked entry cannot
-          # make this runner read a path outside the checkout.
-          changed=$(git diff --name-only --no-renames "${{ github.event.pull_request.base.sha }}...prhead" -- domains/ | grep -E '^domains/[^/]+\.json$' || true)
-          if [ -z "$changed" ]; then
-            echo 'this PR changes nothing under domains/'
-          fi
+          changed=$(git diff --name-only --no-renames "${BASE_SHA}...prhead" -- domains/ | grep -E '^domains/[^/]+\.json$' || true)
           for file in $changed; do
             if git cat-file -e "prhead:$file" 2>/dev/null; then
               mkdir -p "$(dirname "$file")"
@@ -49,20 +48,19 @@ jobs:
               echo "removed $file, as the pull request does"
             fi
           done
-          # The maintainer-owned files always come from the base branch.
-          git checkout HEAD -- domains/_meta.json domains/SCHEMA.json domains/_example.json
+          git checkout HEAD -- registry/
 
-      - name: Decide what to report
+      - name: Build the report
         id: build
         env:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename' > /tmp/changed.txt || true
-          CHANGED_FILES="$(cat /tmp/changed.txt)" \
-            node scripts/pr-report.js > /tmp/comment.md && verdict=pass || verdict=fail
+          CHANGED_FILES="$(cat /tmp/changed.txt)" node scripts/report.js > /tmp/comment.md && verdict=pass || verdict=fail
           echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
           cat /tmp/comment.md
 

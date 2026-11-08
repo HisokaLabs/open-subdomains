@@ -4,7 +4,7 @@ name: push
 # after the check job has passed on the merge commit.
 #
 # Required secret: CLOUDFLARE_API_TOKEN with Zone.DNS edit permission on all
-# zones listed in domains/_meta.json.
+# zones listed in registry/zones.json.
 
 on:
   push:
@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - 'domains/**'
+      - 'registry/**'
       - 'dnsconfig.js'
 
 # Never apply two dnscontrol pushes at once. Overlapping runs would race on

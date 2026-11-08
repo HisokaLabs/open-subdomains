@@ -36,6 +36,7 @@ jobs:
             };
 
             add('subdomain', (f) => f.startsWith('domains/'));
+            add('policy', (f) => f.startsWith('registry/'));
             add('scripts', (f) => f.startsWith('scripts/') || f === 'package.json');
             add('ci', (f) => f.startsWith('.github/'));
             add('docs', (f) => f.endsWith('.md'));

@@ -9,9 +9,10 @@ body:
         Thanks for claiming a subdomain. Fill in the details below and a
         maintainer will review the pull request. CI validates the DNS change.
 
-        Make sure the filename in `domains/` matches the subdomain exactly.
+        The filename in `domains/` is the name, so `mc` means
+        `domains/mc.is-a.ceo.json` and nothing inside the file repeats it.
         Check the name is free first at [is-a.ceo/check](https://is-a.ceo/check),
-        and see [domains/SCHEMA.json](https://github.com/HisokaLabs/open-subdomains/blob/main/domains/SCHEMA.json)
+        and see [registry/schema.json](https://github.com/HisokaLabs/open-subdomains/blob/main/registry/schema.json)
         for the full field list.
   - type: input
     id: subdomain
@@ -25,6 +26,7 @@ body:
     id: owner
     attributes:
       label: GitHub username
+      description: The account that will open the pull request.
       placeholder: your-username
     validations:
       required: true

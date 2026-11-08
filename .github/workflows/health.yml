@@ -27,7 +27,7 @@ jobs:
       - name: Probe every zone
         id: probe
         continue-on-error: true
-        run: npm run health
+        run: npm run zones
 
       - name: File the outage issue
         if: steps.probe.outcome == 'failure'
@@ -40,8 +40,8 @@ jobs:
             const title = 'Zone health: a managed zone is not resolving';
             const body = [
               marker,
-              '`npm run health` failed in the scheduled probe, so at least one',
-              'zone in `domains/_meta.json` no longer answers with an SOA.',
+              '`npm run zones` failed in the scheduled probe, so at least one',
+              'zone in `registry/zones.json` no longer answers with an SOA.',
               '',
               `Latest run: ${process.env.RUN_URL}`,
               '',

@@ -2,28 +2,23 @@ name: check
 
 on:
   pull_request:
-    # A draft PR opens and a finished one fires ready_for_review, so both have
-    # to be listed: naming `types` replaces the default set rather than adding.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # The shape rules apply to every pull request, not only the ones that touch
-  # the registry, so this job has no filter of its own. It is separate from
-  # `validate` because that job skips a docs-only PR and this one must not.
-  format:
-    name: Check the pull request shape
-    if: github.event_name == 'pull_request'
+  validate:
+    name: Validate the registry
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -36,85 +31,22 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Fetch the base branch
-        run: git fetch --no-tags origin "$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
-
-      - name: Check file names, placement and PR scope
-        env:
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: npm run check:format
-
-  validate:
-    name: Validate registry
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - id: filter
-        name: Decide what to validate
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT: ${{ github.event_name }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          if [ "$EVENT" != 'pull_request' ]; then
-            echo "registry=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          touched=false
-          if files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
-            if echo "$files" | grep -qE '^(domains/|scripts/|test/|dnsconfig\.js|package\.json|.*\.json$)'; then
-              touched=true
-            fi
-          else
-            touched=true
-          fi
-          echo "registry=$touched" >> "$GITHUB_OUTPUT"
-          if [ "$touched" = 'false' ]; then
-            echo 'No registry-relevant files changed, so nothing to validate.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - if: steps.filter.outputs.registry == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-
-      - if: steps.filter.outputs.registry == 'true'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: '24'
-
-      # npm ci rather than npm install: it installs exactly what the lockfile
-      # pins, so a changed transitive dependency cannot slip into the checks.
-      - if: steps.filter.outputs.registry == 'true'
-        name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - if: steps.filter.outputs.registry == 'true' && github.event_name == 'pull_request'
+      # The policy comparison reads registry/*.json at the base commit, so the
+      # branch it compares against has to exist locally.
+      - if: github.event_name == 'pull_request'
         name: Fetch the base branch
         run: git fetch --no-tags origin "$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
 
-      - if: steps.filter.outputs.registry == 'true'
-        name: Validate domains/*.json
+      - name: Validate domains/
         env:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          REQUIRE_BASE_REF: '1'
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
         run: npm run check
 
-      - if: steps.filter.outputs.registry == 'true'
-        name: Run the validator test suite
+      - name: Run the test suite
         run: npm test
 
-      - if: steps.filter.outputs.registry == 'true' && github.event_name == 'pull_request'
-        name: Verify entry owners match the PR author
-        env:
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: npm run verify-owners
-
-      - if: steps.filter.outputs.registry == 'true'
-        name: DNSControl check
+      - name: DNSControl check
         uses: HisokaLabs/dnscontrol-actions@efc133a75954bd7bc4dc6b077a107b7244fccb02 # v4
         with:
           args: check
