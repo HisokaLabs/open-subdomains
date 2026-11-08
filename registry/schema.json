@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://is-a.ceo/entry.schema.json",
+  "title": "Subdomain entry",
+  "description": "One claim per file in domains/. The filename is the name, so the file itself never repeats it: domains/jane.is-a.ceo.json claims jane.is-a.ceo.",
+  "type": "object",
+  "required": ["owner"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor hint. Point it at ../registry/schema.json for autocomplete."
+    },
+    "owner": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "description": "Who holds the name. None of the three keys is required on its own; at least one has to be there. username or id is what ties the claim to the account opening the pull request, so an entry with only an email can only be filed by a trusted author.",
+      "properties": {
+        "username": {
+          "type": "string",
+          "maxLength": 39,
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$",
+          "description": "GitHub handle. Ties the claim to the account that opens the pull request."
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Numeric GitHub account id, from https://api.github.com/users/<username>. Survives a rename, so it is the stronger identity."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254,
+          "description": "Address a maintainer can reach you at."
+        }
+      }
+    },
+    "repo": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "github.com/you/project, or a full https URL. Shown on the site."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "One line, shown on the site."
+    },
+    "proxied": {
+      "type": "boolean",
+      "default": false,
+      "description": "Route A, AAAA and CNAME through the Cloudflare proxy. Leave it false for GitHub Pages, where proxying breaks certificate issuance."
+    },
+    "records": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Omit the key entirely for the GitHub Pages default. An empty object is refused.",
+      "properties": {
+        "A": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string", "format": "ipv4" },
+          "description": "Public IPv4 addresses only; private, loopback and documentation ranges are refused."
+        },
+        "AAAA": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string", "format": "ipv6" }
+        },
+        "CNAME": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "minItems": 1, "maxItems": 1, "items": { "type": "string" } }
+          ],
+          "description": "One target. Cannot share a name with A, AAAA, MX, NS, SRV or PTR, and cannot sit on the apex."
+        },
+        "TXT": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string", "maxLength": 255 }
+        },
+        "MX": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["priority", "target"],
+            "additionalProperties": false,
+            "properties": {
+              "priority": { "type": "integer", "minimum": 0, "maximum": 65535 },
+              "target": { "type": "string" }
+            }
+          }
+        },
+        "NS": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string" }
+        },
+        "SRV": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["priority", "weight", "port", "target"],
+            "additionalProperties": false,
+            "properties": {
+              "priority": { "type": "integer", "minimum": 0, "maximum": 65535 },
+              "weight": { "type": "integer", "minimum": 0, "maximum": 65535 },
+              "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+              "target": { "type": "string" }
+            }
+          }
+        },
+        "CAA": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["flag", "tag", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "flag": { "type": "integer", "enum": [0, 128] },
+              "tag": { "type": "string", "enum": ["issue", "issuewild", "iodef"] },
+              "value": { "type": "string", "maxLength": 255 }
+            }
+          }
+        },
+        "PTR": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

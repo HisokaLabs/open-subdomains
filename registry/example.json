@@ -1,0 +1,13 @@
+{
+  "$schema": "./schema.json",
+  "owner": {
+    "username": "your-github-username",
+    "id": 1234567,
+    "email": "jane@example.net"
+  },
+  "repo": "github.com/your-github-username/your-repo",
+  "description": "One line about what runs here.",
+  "records": {
+    "CNAME": "your-project.pages.dev"
+  }
+}
