@@ -5,40 +5,70 @@
 
 Free subdomains under `is-a.ceo`, for a portfolio, an API, or the Minecraft server you keep restarting.
 
-This repository is the DNS registry behind [is-a.ceo](https://is-a.ceo). Every claimed name is one JSON file in `domains/`. Merge the pull request and the record is live in a couple of minutes. No dashboard and no account: the pull request stays as the record of who asked for the name and when it went live.
+Every claimed name is one JSON file in `domains/`. The filename is the name. Merge the pull request and the record is live in a couple of minutes.
 
-[Documentation](https://docs.is-a.ceo) &middot; [Terms of Service](https://is-a.ceo/terms) &middot; [Name checker](https://is-a.ceo/check) &middot; [Abuse policy](https://is-a.ceo/abuse)
+[Documentation](https://docs.is-a.ceo) &middot; [Check a name](https://is-a.ceo/check) &middot; [Registered subdomains](https://is-a.ceo/#domains)
 
-## Register a subdomain
+## Claim one
 
-1. Check the name at [is-a.ceo/check](https://is-a.ceo/check). It reads the same policy the validator applies, so its verdict matches CI.
-2. Fork this repository and copy `domains/_example.json` to `domains/<your-subdomain>.is-a.ceo.json`.
-3. Fill in the file. `owner` has to be your own GitHub username, and you have to be the one opening the pull request. Leave `owner` or `email` detailed enough that a maintainer can reach you.
-4. Run `npm run verify`. That is the same command CI runs.
-5. Open the pull request against `main` and fill in the template. Watch it afterwards in case a maintainer asks for changes.
+```json title="domains/jane.is-a.ceo.json"
+{
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "jane",
+    "id": 1234567
+  },
+  "repo": "github.com/jane/jane.github.io",
+  "description": "Portfolio"
+}
+```
 
-These names are for personal and non-commercial sites. No shops, no business sites, no advertising, and no holding a name to sell it later. The site behind the name has to be reachable and finished when you open the pull request; a placeholder is refused.
+That is the whole file. No `domain`, no `subdomain`, no `records`: the filename says `jane` in `is-a.ceo`, and leaving `records` out points the name at GitHub Pages, so it serves `jane.github.io` as soon as the merge lands.
 
-Leave `records` out of the file and the name points at GitHub Pages by default, so `your-name.is-a.ceo` serves `your-name.github.io` the moment the pull request merges.
+1. Check the name at [is-a.ceo/check](https://is-a.ceo/check). It reads the same policy the validator applies.
+2. Fork this repository and copy `registry/example.json` to `domains/<your-name>.is-a.ceo.json`.
+3. Fill in `owner` with at least one of `username`, `id` or `email`. `id` is the number at `https://api.github.com/users/<your-name>`, and it is what keeps the claim yours after a rename. An entry with only an `email` cannot be matched to your account, so add `username` or `id` when you are claiming it yourself.
+4. Open the pull request from the account named in `owner`. A claim belongs to whoever opens it.
+5. Run `npm run verify` if you want the same verdict CI will give you.
 
-The registry accepts one claim per pull request, in one file. `domains/` is the only directory a claimant edits.
+## What lives where
 
-The full walkthrough, the field list and the record types are in the documentation. Start with [Claim a subdomain](https://docs.is-a.ceo/claim/), then keep [Troubleshooting](https://docs.is-a.ceo/troubleshooting/) open while CI runs.
+| Path | Holds |
+| --- | --- |
+| `domains/` | One JSON file per claim, and nothing else |
+| `registry/zones.json` | The zones this repository serves |
+| `registry/reserved.json` | Names the registry already points somewhere |
+| `registry/blocked.json` | Names refused under every zone |
+| `registry/trusted.json` | Who may edit code, policy, and other people's entries |
+| `registry/schema.json` | The shape of one entry, for editor autocomplete |
 
-## Report abuse
+Policy is not mixed into `domains/`, so every file there is a claim by definition.
 
-If a subdomain breaks the [Terms of Service](https://is-a.ceo/terms), report it to [abuse@hisoka.net](mailto:abuse@hisoka.net). The policy and what happens after a report is published at [is-a.ceo/abuse](https://is-a.ceo/abuse).
+## The rules worth knowing before you start
+
+These names are personal and non-commercial. No shops, no business sites, no advertising, and no holding a name to sell it later. The site behind the name has to be reachable and finished when you open the pull request; a placeholder is refused.
+
+Two lists decide what is claimable, and they are not the same thing.
+
+`registry/reserved.json` holds names the registry operates itself, so their records live in the Cloudflare dashboard rather than in `domains/`. They are not free, and asking does not change that. `dnsconfig.js` keeps them out of purge on every push, which is why `www` and `docs` survive without an entry file.
+
+`registry/blocked.json` holds brands and impersonation targets. Those are refused for everyone, trusted authors included.
 
 ## For maintainers
 
-DNS records are managed with [DNSControl](https://github.com/StackExchange/dnscontrol) and pushed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/HisokaLabs/dnscontrol-actions). `dnsconfig.js` reads `domains/*.json` at runtime, so nothing is generated ahead of time.
+DNS records are managed with [DNSControl](https://github.com/StackExchange/dnscontrol) and pushed by [HisokaLabs/dnscontrol-actions@v4](https://github.com/HisokaLabs/dnscontrol-actions). `dnsconfig.js` reads `domains/*.json` and `registry/zones.json` at run time, so nothing is generated ahead of time.
 
 ```bash
-npm run verify        # check, check:format and the full suite, as CI runs them
-npm test              # the suite alone, 129 cases, no dependencies
+npm run verify     # the validator and the test suite, as CI runs them
+npm test           # the suite alone
+npm run status     # what every entry actually serves
+npm run zones      # does every zone answer with an SOA
+npm run proof      # write or remove a Vercel ownership sidecar
 ```
 
-The repository guide that used to live here is now in the documentation: [Workflows](https://docs.is-a.ceo/workflows/), [Watchers and scripts](https://docs.is-a.ceo/operations/), [DNS pipeline](https://docs.is-a.ceo/dns-pipeline/), and [Adding a zone](https://docs.is-a.ceo/zones/).
+`npm run check` is the validator on its own. Add `--json` for `{ ok, verified, problems, warnings }`.
+
+The whole pipeline is described at [docs.is-a.ceo](https://docs.is-a.ceo).
 
 ## License
 
