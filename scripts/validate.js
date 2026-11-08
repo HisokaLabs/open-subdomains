@@ -661,7 +661,7 @@ function main() {
 
   const entries = [];
   if (policy && fs.existsSync(R.DOMAINS_DIR)) {
-    for (const { filename, full } of R.loadClaims()) {
+    for (const { filename, full } of R.loadClaims(R.DOMAINS_DIR, { all: true })) {
       const name = R.parseClaimFile(filename, policy.zones);
       if (!name) {
         problems.push({

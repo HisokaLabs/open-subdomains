@@ -306,14 +306,14 @@ function fqdnOf(subdomain, zone) {
   return isApex(subdomain) ? zone : `${subdomain}.${zone}`;
 }
 
-function loadClaims(dir = DOMAINS_DIR) {
+function loadClaims(dir = DOMAINS_DIR, { all = false } = {}) {
   if (!fs.existsSync(dir)) fail("domains/ not found");
-  return fs
+  const claims = fs
     .readdirSync(dir)
     .sort()
     .filter((filename) => filename.endsWith(".json"))
-    .map((filename) => ({ filename, full: path.join(dir, filename) }))
-    .filter(({ full }) => fs.lstatSync(full).isFile());
+    .map((filename) => ({ filename, full: path.join(dir, filename) }));
+  return all ? claims : claims.filter(({ full }) => fs.lstatSync(full).isFile());
 }
 
 function ownerOf(entry) {
