@@ -1,0 +1,16 @@
+{
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "ryhardiyan",
+    "id": 177131540,
+    "email": "ryhardev@gmail.com"
+  },
+  "repo": "github.com/ryhardiyan/ryhardev",
+  "description": "Make A Wish.",
+  "proxied": false,
+  "records": {
+    "CNAME": [
+      "2e86b318bc4a98b6.vercel-dns-017.com."
+    ]
+  }
+}
