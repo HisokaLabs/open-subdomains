@@ -1,0 +1,15 @@
+{
+  "$schema": "../registry/schema.json",
+  "domain": "is-a.ceo",
+  "subdomain": "reiha",
+  "owner": {
+    "username": "shuu-arch",
+    "id": 195839643,
+    "email": "thecatiscrazy2434@gmail.com"
+  },
+  "repo": "https://github.com/shuu-arch/reihaproject",
+  "description": "Aku nak jadi CEO",
+  "records": {
+    "CNAME": "d65e3912081155d7.vercel-dns-017.com"
+  }
+}
