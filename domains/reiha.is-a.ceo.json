@@ -1,0 +1,11 @@
+{
+  "$schema": "../registry/schema.json",
+  "domain": "is-a.ceo",
+  "subdomain": "reiha",
+  "owner": "shuu-arch",
+  "repo": "https://github.com/shuu-arch/Reiha-CEO",
+  "description": "Reiha-AI adalah bot WhatsApp multifungsi yang siap membantu berbagai kebutuhan sehari-hari."
+  "records": {
+    "CNAME": "d65e3912081155d7.vercel-dns-017.com."
+  }
+}
