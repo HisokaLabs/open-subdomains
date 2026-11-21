@@ -1,0 +1,15 @@
+{
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "xielpusing112323124",
+    "id": 211736142
+  },
+  "repo": "github.com/xielpusing112323124/xiel.is-a.ceo",
+  "description": "Subdomain for Xiel's personal projects and portfolio.",
+  "proxied": false,
+  "records": {
+    "CNAME": [
+      "exquisite-malasada-99576d.netlify.app"
+    ]
+  }
+}
