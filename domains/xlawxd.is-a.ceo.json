@@ -1,0 +1,10 @@
+{
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "XLawXD0"
+  },
+  "description": "Bio links",
+  "records": {
+    "CNAME": "dc5624d49a0b7af7.vercel-dns-017.com."
+  }
+}
