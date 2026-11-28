@@ -1,0 +1,11 @@
+{
+  "$schema": "../registry/schema.json",
+  "owner": {
+    "username": "andinside"
+  },
+  "repo": "github.com/andinside/is-a.ceo",
+  "description": "Cari Eksistensi Online",
+  "records": {
+    "CNAME": "gemini.host.nusa.dev"
+  }
+}
